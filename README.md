@@ -12,6 +12,7 @@ Cliente de e-mail **nativo em Swift** para Apple, rápido, compatível com **Mic
 | [docs/01-requisitos.md](docs/01-requisitos.md) | Funcionalidades e requisitos |
 | [docs/02-arquitetura.md](docs/02-arquitetura.md) | Opções técnicas em estudo |
 | [docs/ideias.md](docs/ideias.md) | Caixa de entrada de ideias soltas |
+| [docs/pesquisa/](docs/pesquisa/reports/) | Pesquisas de mercado e técnicas |
 | [docs/decisoes/](docs/decisoes/) | Registro de decisões técnicas (ADRs) |
 
 ## Licença
