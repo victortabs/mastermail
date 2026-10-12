@@ -1,0 +1,523 @@
+<title>Pesquisa MasterMail</title>
+<meta name="description" content="Dores, atalhos, IA, MCP e limites da Microsoft em clientes de e-mail — outubro de 2026">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: relatório técnico — índice fixo à esquerda, coluna de leitura de ~68ch, blocos de dados (tabelas, teclas, linha do tempo) mais largos */
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --fg: #16202b;
+  --muted: #5a6776;
+  --line: #dde2e8;
+  --accent: #1f5fbf;
+  --accent-soft: #e6eefb;
+  --crit: #b42318;
+  --crit-soft: #fdecea;
+  --high: #b54708;
+  --high-soft: #fef3e6;
+  --mid: #7a5c00;
+  --mid-soft: #fbf5dc;
+  --ok: #067647;
+  --ok-soft: #e6f6ee;
+  --kbd-bg: #eef1f5;
+  --kbd-edge: #c5ccd6;
+  --f-display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --f-body: "IBM Plex Sans", -apple-system, "Segoe UI", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1419; --surface: #161d25; --fg: #e4e9ef; --muted: #98a5b3; --line: #2a3440;
+    --accent: #7aa7f0; --accent-soft: #1a2a42;
+    --crit: #f2867c; --crit-soft: #3a1c1a; --high: #f0a868; --high-soft: #3a2614;
+    --mid: #e3c76a; --mid-soft: #332c12; --ok: #6fd3a2; --ok-soft: #13301f;
+    --kbd-bg: #222c37; --kbd-edge: #3a4654; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1419; --surface: #161d25; --fg: #e4e9ef; --muted: #98a5b3; --line: #2a3440;
+  --accent: #7aa7f0; --accent-soft: #1a2a42;
+  --crit: #f2867c; --crit-soft: #3a1c1a; --high: #f0a868; --high-soft: #3a2614;
+  --mid: #e3c76a; --mid-soft: #332c12; --ok: #6fd3a2; --ok-soft: #13301f;
+  --kbd-bg: #222c37; --kbd-edge: #3a4654; color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body { background: var(--bg); color: var(--fg); font: 16px/1.6 var(--f-body); }
+a { color: var(--accent); text-underline-offset: 2px; }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+
+.shell { max-width: 1180px; margin: 0 auto; padding-inline: 20px; padding-block: 0 64px; display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px; }
+@media (max-width: 900px) { .shell { grid-template-columns: minmax(0, 1fr); gap: 0; padding-inline: 16px; } nav.toc { display: none; } }
+
+nav.toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 24px); align-self: start; padding-top: 40px; font-size: 14px; }
+nav.toc .label { font: 500 11px/1 var(--f-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 12px; }
+nav.toc ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; counter-reset: toc; }
+nav.toc a { display: block; padding: 5px 10px; border-left: 2px solid var(--line); color: var(--muted); text-decoration: none; }
+nav.toc a:hover { color: var(--fg); border-color: var(--muted); }
+nav.toc a.active { color: var(--accent); border-color: var(--accent); font-weight: 500; }
+
+main { min-width: 0; }
+header.hero { padding-block: 48px 32px; border-bottom: 1px solid var(--line); }
+.eyebrow { font: 500 12px/1 var(--f-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+h1 { font: 700 clamp(30px, 5vw, 46px)/1.08 var(--f-display); letter-spacing: -.02em; margin: 14px 0 16px; text-wrap: balance; max-width: 20ch; }
+.lede { font-size: 18px; color: var(--muted); max-width: 64ch; margin: 0; }
+.meta { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: 20px; font: 13px/1.4 var(--f-mono); color: var(--muted); }
+
+section { padding-block: 44px 8px; scroll-margin-top: 16px; }
+h2 { font: 700 26px/1.2 var(--f-display); letter-spacing: -.01em; margin: 0 0 6px; text-wrap: balance; }
+h2 + .sub { color: var(--muted); margin: 0 0 22px; max-width: 64ch; }
+h3 { font: 600 17px/1.3 var(--f-body); margin: 28px 0 10px; }
+p { max-width: 68ch; margin: 0 0 14px; }
+.prose ul { max-width: 68ch; padding-left: 20px; margin: 0 0 14px; }
+.prose li { margin-bottom: 6px; }
+strong { font-weight: 600; }
+
+/* conclusões principais */
+.findings { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.findings li { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 12px; padding: 16px 18px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+.findings .n { font: 500 13px/1.6 var(--f-mono); color: var(--accent); }
+.findings b { display: block; font-weight: 600; margin-bottom: 2px; }
+.findings span { color: var(--muted); font-size: 15px; }
+
+/* linha do tempo */
+.timeline { list-style: none; margin: 0; padding: 0; position: relative; display: grid; gap: 0; }
+.timeline li { display: grid; grid-template-columns: 112px 20px minmax(0, 1fr); gap: 12px; padding-bottom: 20px; position: relative; }
+.timeline li::before { content: ""; position: absolute; left: 133px; top: 14px; bottom: -6px; width: 2px; background: var(--line); }
+.timeline li:last-child::before { display: none; }
+.timeline time { font: 500 13px/1.5 var(--f-mono); color: var(--muted); text-align: right; padding-top: 2px; }
+.timeline .dot { width: 12px; height: 12px; border-radius: 50%; margin: 6px auto 0; background: var(--surface); border: 2px solid var(--muted); position: relative; z-index: 1; }
+.timeline .dot.crit { border-color: var(--crit); background: var(--crit); }
+.timeline .dot.now { border-color: var(--accent); background: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+.timeline b { display: block; font-weight: 600; }
+.timeline span { color: var(--muted); font-size: 15px; }
+@media (max-width: 520px) { .timeline li { grid-template-columns: 78px 20px minmax(0, 1fr); } .timeline li::before { left: 99px; } }
+
+/* tabelas */
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); margin: 8px 0 20px; }
+table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
+th, td { text-align: left; padding: 11px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font: 500 11.5px/1.3 var(--f-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); background: var(--bg); white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.chip { display: inline-block; font: 500 12px/1 var(--f-mono); padding: 5px 8px; border-radius: 4px; white-space: nowrap; }
+.chip.crit { color: var(--crit); background: var(--crit-soft); }
+.chip.high { color: var(--high); background: var(--high-soft); }
+.chip.mid { color: var(--mid); background: var(--mid-soft); }
+.chip.ok { color: var(--ok); background: var(--ok-soft); }
+.chip.no { color: var(--muted); background: var(--kbd-bg); }
+
+/* concorrentes */
+.apps { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; margin: 8px 0 20px; }
+.app { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 16px; display: grid; gap: 10px; align-content: start; min-width: 0; }
+.app h4 { margin: 0; font: 700 18px/1.2 var(--f-display); }
+.app .tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.app p { font-size: 14.5px; color: var(--muted); margin: 0; }
+.app .price { font: 500 13px/1.4 var(--f-mono); color: var(--fg); }
+
+/* teclado */
+kbd { font: 500 13px/1 var(--f-mono); display: inline-block; min-width: 26px; text-align: center; padding: 5px 7px; border-radius: 5px; background: var(--kbd-bg); border: 1px solid var(--kbd-edge); border-bottom-width: 2px; color: var(--fg); }
+.keys { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; margin: 8px 0 20px; }
+.key { display: flex; align-items: center; gap: 10px; padding: 9px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; font-size: 14.5px; }
+.key .k { display: flex; gap: 4px; flex-shrink: 0; }
+.key.diff { border-color: var(--accent); background: var(--accent-soft); }
+.legend { font-size: 13.5px; color: var(--muted); display: flex; gap: 16px; flex-wrap: wrap; margin-top: -8px; margin-bottom: 18px; }
+.legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -1px; margin-right: 6px; border: 1px solid var(--line); background: var(--surface); }
+.legend i.diff { border-color: var(--accent); background: var(--accent-soft); }
+
+.decisions { list-style: none; padding: 0; margin: 8px 0 20px; display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.decisions li { padding: 14px 16px; border-top: 3px solid var(--accent); background: var(--surface); border-radius: 0 0 6px 6px; font-size: 15px; }
+.decisions b { display: block; margin-bottom: 4px; }
+
+/* números grandes */
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin: 8px 0 20px; }
+.stat { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; }
+.stat .v { font: 700 28px/1.1 var(--f-display); font-variant-numeric: tabular-nums; }
+.stat .l { font-size: 13.5px; color: var(--muted); margin-top: 4px; }
+.stat.warn .v { color: var(--high); }
+
+/* níveis de acesso MCP */
+.ladder { list-style: none; margin: 8px 0 20px; padding: 0; display: grid; gap: 6px; }
+.ladder li { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 14px; align-items: center; padding: 10px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; font-size: 14.5px; }
+.ladder .lv { font: 500 13px/1.3 var(--f-mono); }
+.ladder li:nth-child(1) .lv { color: var(--muted); }
+.ladder li:nth-child(2) .lv, .ladder li:nth-child(3) .lv { color: var(--ok); }
+.ladder li:nth-child(4) .lv { color: var(--mid); }
+.ladder li:nth-child(5) { border-color: var(--crit); }
+.ladder li:nth-child(5) .lv { color: var(--crit); }
+@media (max-width: 520px) { .ladder li { grid-template-columns: minmax(0, 1fr); gap: 4px; } }
+
+/* arquitetura */
+.flow { display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px; margin: 8px 0 20px; }
+.flow .box { flex: 1 1 170px; min-width: 0; padding: 12px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; font-size: 14px; }
+.flow .box b { display: block; font-family: var(--f-mono); font-weight: 500; font-size: 13px; color: var(--accent); margin-bottom: 4px; }
+.flow .arrow { align-self: center; font: 500 13px var(--f-mono); color: var(--muted); padding: 0 2px; }
+@media (max-width: 620px) { .flow { flex-direction: column; } .flow .arrow { transform: rotate(90deg); align-self: flex-start; padding-left: 20px; } }
+
+.callout { padding: 14px 18px; border-left: 3px solid var(--high); background: var(--high-soft); border-radius: 0 6px 6px 0; margin: 8px 0 20px; max-width: 72ch; font-size: 15px; }
+.callout.info { border-color: var(--accent); background: var(--accent-soft); }
+
+/* lacunas */
+.gaps { list-style: none; padding: 0; margin: 8px 0 20px; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 8px; }
+.gaps li { padding: 10px 14px 10px 36px; position: relative; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; font-size: 15px; }
+.gaps li::before { content: "+"; position: absolute; left: 14px; top: 9px; font: 600 15px var(--f-mono); color: var(--ok); }
+
+.questions { margin: 8px 0 20px; padding-left: 0; list-style: none; counter-reset: q; display: grid; gap: 10px; max-width: 76ch; }
+.questions li { counter-increment: q; display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 8px; font-size: 15.5px; }
+.questions li::before { content: counter(q, decimal-leading-zero); font: 500 13px/1.75 var(--f-mono); color: var(--muted); }
+.questions .tag { font: 500 11px/1 var(--f-mono); color: var(--accent); text-transform: uppercase; letter-spacing: .06em; margin-right: 6px; }
+
+.sources { font-size: 13px; color: var(--muted); max-width: 76ch; margin: 4px 0 0; }
+.sources a { color: var(--muted); }
+footer { margin-top: 56px; padding-top: 20px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+</style>
+
+<div class="shell">
+  <nav class="toc" aria-label="Índice">
+    <div class="label">Índice</div>
+    <ol>
+      <li><a href="#resumo">Resumo</a></li>
+      <li><a href="#prazos">Prazos que importam</a></li>
+      <li><a href="#dores">Dores dos usuários</a></li>
+      <li><a href="#concorrentes">Concorrentes</a></li>
+      <li><a href="#teclado">Atalhos e velocidade</a></li>
+      <li><a href="#ia">Inteligência artificial</a></li>
+      <li><a href="#mcp">MCP e IA externa</a></li>
+      <li><a href="#microsoft">Limites da Microsoft</a></li>
+      <li><a href="#lacunas">Oportunidades</a></li>
+      <li><a href="#perguntas">Perguntas em aberto</a></li>
+    </ol>
+  </nav>
+
+  <main>
+    <header class="hero">
+      <div class="eyebrow">MasterMail · Pesquisa de mercado e técnica</div>
+      <h1>O MasterMail chega quando o EWS sai</h1>
+      <p class="lede">Levantamento das maiores reclamações sobre apps de e-mail, do fluxo por teclado do Superhuman, dos recursos de IA, de como expor o app a agentes via MCP e dos limites da Microsoft para um cliente de terceiros.</p>
+      <div class="meta"><span>Outubro de 2026</span><span>6 frentes de pesquisa</span><span>Fontes: docs oficiais, imprensa, fóruns</span></div>
+    </header>
+
+    <section id="resumo">
+      <h2>Resumo</h2>
+      <p class="sub">As sete conclusões que mais afetam o projeto.</p>
+      <ol class="findings">
+        <li><span class="n">1</span><div><b>Há uma janela aberta agora.</b><span>A Microsoft está desligando o EWS, que o Mail e o Calendário do Mac usam com Microsoft 365. A Apple ainda não lançou a migração para o Graph, e Macs Intel não vão recebê-la. O novo Outlook é rejeitado por não parecer nativo.</span></div></li>
+        <li><span class="n">2</span><div><b>As mesmas reclamações aparecem em todos os apps.</b><span>Notificações atrasadas, busca que não encontra, sincronização que para sem aviso, IA imposta e credenciais guardadas na nuvem do fornecedor.</span></div></li>
+        <li><span class="n">3</span><div><b>Os apps premium mais amados ignoram o Microsoft 365.</b><span>Mimestream e Shortwave só atendem Gmail. Quem atende M365 é caro (Superhuman) ou usa Electron e guarda tokens no servidor (Spark).</span></div></li>
+        <li><span class="n">4</span><div><b>A velocidade do Superhuman vem do sistema, não das teclas.</b><span>As teclas são quase as do Gmail. O diferencial é responder em menos de 100 ms, banco local, desfazer em vez de confirmar e uma paleta Cmd+K que ensina.</span></div></li>
+        <li><span class="n">5</span><div><b>Resumo virou o básico. O que vende é agir com contexto.</b><span>Perguntas sobre o inbox inteiro, rascunhos na sua voz e rótulos por prompt ainda são pagos. Ninguém explica SPF, DKIM e DMARC ao usuário.</span></div></li>
+        <li><span class="n">6</span><div><b>No MCP, o agente lê e rascunha; enviar exige o humano.</b><span>E-mail é o caso clássico de prompt injection. Já houve um servidor MCP malicioso que copiava todo e-mail enviado para um atacante.</span></div></li>
+        <li><span class="n">7</span><div><b>O maior obstáculo é o consentimento, não a API.</b><span>Desde novembro de 2025, muitas empresas exigem aprovação do TI para apps de e-mail de terceiros, exceto uma lista fechada de apps conhecidos.</span></div></li>
+      </ol>
+    </section>
+
+    <section id="prazos">
+      <h2>Prazos que importam</h2>
+      <p class="sub">Datas que definem a janela de oportunidade e as regras do jogo.</p>
+      <ol class="timeline">
+        <li><time>jul 2025</time><span class="dot"></span><div><b>Grammarly compra o Superhuman</b><span>O cliente premium de referência passa a fazer parte de uma empresa maior.</span></div></li>
+        <li><time>nov 2025</time><span class="dot crit"></span><div><b>Microsoft bloqueia consentimento do usuário para Mail.* e Calendars.*</b><span>Apps de e-mail de terceiros passam a precisar de aprovação do administrador na política padrão.</span></div></li>
+        <li><time>jul 2026</time><span class="dot"></span><div><b>Bloqueio ampliado e recuo do Copilot</b><span>Contatos, People e Tasks entram na lista. A Microsoft retira as sugestões do Copilot da busca do Outlook após reclamações.</span></div></li>
+        <li><time>22 set 2026</time><span class="dot"></span><div><b>Notion Mail encerra</b><span>Rascunhos, snippets e regras foram apagados. A Notion disse que metade dos usuários já usava e-mail por agentes.</span></div></li>
+        <li><time>1 out 2026</time><span class="dot now"></span><div><b>Começa o desligamento do EWS no Exchange Online</b><span>Mail, Calendário e Contatos do macOS param de sincronizar M365 conforme cada empresa é desligada. iPhone e iPad seguem funcionando via ActiveSync.</span></div></li>
+        <li><time>dez 2026</time><span class="dot"></span><div><b>SMTP com senha básica desligado por padrão</b><span>Reforça que OAuth é o único caminho.</span></div></li>
+        <li><time>1 abr 2027</time><span class="dot crit"></span><div><b>EWS removido de vez, sem exceções</b><span>Fim do prazo para quem ainda depende do protocolo antigo.</span></div></li>
+      </ol>
+      <p class="sources">Fontes: <a href="https://mc.merill.net/message/MC676299" target="_blank" rel="noopener">MC676299</a>, <a href="https://mc.merill.net/message/MC1227454" target="_blank" rel="noopener">MC1227454</a>, <a href="https://www.macrumors.com/2026/10/01/apple-mail-mac-stop-sync-microsoft-365/" target="_blank" rel="noopener">MacRumors</a>, <a href="https://blog-en.topedia.com/2025/11/microsoft-managed-default-app-consent-policy-now-blocks-20-additional-permissions/" target="_blank" rel="noopener">Topedia</a>, <a href="https://www.androidauthority.com/notion-mail-is-shutting-down-3681674/" target="_blank" rel="noopener">Android Authority</a>, <a href="https://office-watch.com/2026/outlook-copilot-search-canceled/" target="_blank" rel="noopener">Office Watch</a>.</p>
+    </section>
+
+    <section id="dores">
+      <h2>Dores dos usuários</h2>
+      <p class="sub">O usuário de Mac com Microsoft 365 está espremido dos dois lados: o Mail está quebrando e o substituto oficial é rejeitado.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Dor</th><th>Apps mais afetados</th><th>Gravidade</th></tr></thead>
+          <tbody>
+            <tr><td>Fim do EWS para Microsoft 365 no Mac</td><td>Mail, Calendário e Contatos do macOS; Outlook legado para Mac</td><td><span class="chip crit">Crítica</span></td></tr>
+            <tr><td>Lentidão e recursos faltando</td><td>Novo Outlook (Windows e Mac)</td><td><span class="chip high">Alta</span></td></tr>
+            <tr><td>Notificações atrasadas (20 a 40 min)</td><td>Gmail iOS, Outlook mobile, Apple Mail sem push</td><td><span class="chip high">Alta</span></td></tr>
+            <tr><td>Busca incompleta</td><td>Apple Mail (Spotlight), app do Gmail, Outlook mobile</td><td><span class="chip high">Alta</span></td></tr>
+            <tr><td>Sincronização que para sem aviso</td><td>Mail do macOS com M365, Outlook Mac e mobile</td><td><span class="chip high">Alta</span></td></tr>
+            <tr><td>Calendários compartilhados e convites</td><td>Calendário iOS/macOS, novo Outlook</td><td><span class="chip high">Média-alta</span></td></tr>
+            <tr><td>Credenciais e dados na nuvem do fornecedor</td><td>Novo Outlook, Spark</td><td><span class="chip high">Média-alta</span></td></tr>
+            <tr><td>IA e categorização impostas</td><td>Apple Mail, Outlook/Copilot, Gmail/Gemini</td><td><span class="chip mid">Média</span></td></tr>
+            <tr><td>Automação perdida</td><td>Novo Outlook (sem AppleScript, sem add-ins antigos)</td><td><span class="chip mid">Média</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>Ranking de reclamações em avaliações negativas</h3>
+      <div class="stats">
+        <div class="stat"><div class="v">18%</div><div class="l">Notificações</div></div>
+        <div class="stat"><div class="v">14%</div><div class="l">Busca</div></div>
+        <div class="stat"><div class="v">11%</div><div class="l">Agrupamento de conversas</div></div>
+        <div class="stat"><div class="v">10%</div><div class="l">Sincronização multicontas</div></div>
+        <div class="stat"><div class="v">9%</div><div class="l">Spam</div></div>
+      </div>
+      <div class="callout">Esses percentuais vêm de um único blog (unstar.app) sobre Gmail, Outlook, Spark e Proton, sem metodologia pública. Servem como indicação de ordem, não como medida.</div>
+      <h3>O que os usuários pedem</h3>
+      <div class="prose"><ul>
+        <li>Sincronização pelo Graph, incluindo calendários compartilhados</li>
+        <li>Busca local rápida que não dependa do Spotlight</li>
+        <li>Push de verdade e aviso claro quando uma conta para ou precisa de novo login</li>
+        <li>Regras fortes e IA opcional</li>
+        <li>Credenciais que ficam no aparelho</li>
+        <li>Visual nativo no Mac e no iPhone, com automação via Atalhos ou AppleScript</li>
+      </ul></div>
+      <p class="sources">Fontes: <a href="https://windowscentral.com/software-apps/windows-11/microsoft-is-wrong-the-new-outlook-for-windows-is-not-ready-for-prime-time" target="_blank" rel="noopener">Windows Central</a>, <a href="https://mjtsai.com/blog/2026/08/20/the-end-of-ews-in-mail-and-applescript-in-outlook/" target="_blank" rel="noopener">Michael Tsai</a>, <a href="https://unstar.app/blog/gmail-outlook-spark-protonmail-email-apps-ranked-2026" target="_blank" rel="noopener">unstar.app</a>, <a href="https://support.microsoft.com/ja-JP/Support/known-issues/fixes-or-workarounds-for-outlook-mobile-apps" target="_blank" rel="noopener">Microsoft Support</a>, <a href="https://www.guru3d.com/story/security-concerns-surrounding-data-transfer-in-the-new-outlook-application/" target="_blank" rel="noopener">Guru3D/Heise</a>, <a href="https://talk.tidbits.com/t/new-mail-category-feature/30647" target="_blank" rel="noopener">TidBITS</a>.</p>
+    </section>
+
+    <section id="concorrentes">
+      <h2>Concorrentes</h2>
+      <p class="sub">Quem é nativo e tem boa IA não atende Microsoft 365. Quem atende cobra caro ou carrega bagagem.</p>
+      <div class="apps">
+        <article class="app"><h4>Superhuman</h4><div class="tags"><span class="chip ok">M365</span><span class="chip mid">Web/Electron</span></div><div class="price">US$ 30–40/mês</div><p>Referência em velocidade e teclado. Sem plano grátis. Comprado pela Grammarly em jul/2025.</p></article>
+        <article class="app"><h4>Mimestream</h4><div class="tags"><span class="chip no">Só Gmail</span><span class="chip ok">Nativo SwiftUI</span></div><div class="price">Assinatura</div><p>O mais elogiado como app de Mac. Microsoft 365 e iOS apenas "planejados".</p></article>
+        <article class="app"><h4>Shortwave</h4><div class="tags"><span class="chip no">Só Gmail</span><span class="chip mid">Web</span></div><div class="price">US$ 18–120/mês</div><p>A IA mais elogiada para consultar e-mails antigos. Preço subiu 20 a 29% em jun/2026.</p></article>
+        <article class="app"><h4>Spark</h4><div class="tags"><span class="chip ok">M365</span><span class="chip mid">Electron</span></div><div class="price">US$ 59,99/ano</div><p>Virou Electron em 2022 e dobrou o uso de memória. Guarda tokens das contas nos servidores, sem opção de desligar.</p></article>
+        <article class="app"><h4>Notion Mail</h4><div class="tags"><span class="chip no">Só Gmail</span><span class="chip crit">Encerrado</span></div><div class="price">—</div><p>Fechou em 22/set/2026 e apagou rascunhos e regras dos usuários.</p></article>
+        <article class="app"><h4>HEY</h4><div class="tags"><span class="chip no">Serviço próprio</span></div><div class="price">US$ 99/ano</div><p>Fluxo opinativo com triagem humana do primeiro contato. Não é cliente para contas existentes.</p></article>
+        <article class="app"><h4>Airmail / Canary</h4><div class="tags"><span class="chip ok">M365</span><span class="chip high">Instáveis</span></div><div class="price">Assinatura</div><p>Airmail mudou para assinatura sem aviso e está parado. Canary tem bugs e IA "mais truque que ferramenta".</p></article>
+        <article class="app"><h4>Zero (Mail0)</h4><div class="tags"><span class="chip ok">M365</span><span class="chip mid">Web</span></div><div class="price">Open source</div><p>Mais de 10,5 mil estrelas no GitHub. Mostra demanda por cliente aberto, mas não é nativo.</p></article>
+      </div>
+      <div class="callout info">Newton fechou duas vezes, Edison vendia dados extraídos dos inboxes e o Notion Mail apagou dados ao fechar. Um cliente open source com dados no aparelho oferece algo que nenhum deles dá: não pode ser fechado nem vendido.</div>
+      <p class="sources">Fontes: <a href="https://mimestream.com/faqs" target="_blank" rel="noopener">Mimestream FAQ</a>, <a href="https://costbench.com/software/ai-productivity/superhuman/" target="_blank" rel="noopener">Costbench</a>, <a href="https://mjtsai.com/blog/2022/10/04/spark-switches-to-electron-and-subscriptions/" target="_blank" rel="noopener">Michael Tsai (Spark)</a>, <a href="https://talk.macpowerusers.com/t/spark-stores-email-account-credentials-on-their-servers/20388" target="_blank" rel="noopener">MacPowerUsers</a>, <a href="https://usagepricing.com/blueprint/activity/shortwave-2026-06-30-price-change" target="_blank" rel="noopener">UsagePricing</a>, <a href="https://9to5mac.com/2018/08/07/rip-newton-mail/" target="_blank" rel="noopener">9to5Mac</a>.</p>
+    </section>
+
+    <section id="teclado">
+      <h2>Atalhos e velocidade</h2>
+      <p class="sub">O núcleo é o vocabulário de teclas únicas do Gmail. O Superhuman muda poucos pontos, destacados em azul.</p>
+      <div class="keys">
+        <div class="key"><span class="k"><kbd>C</kbd></span>Escrever</div>
+        <div class="key"><span class="k"><kbd>R</kbd></span>Responder</div>
+        <div class="key diff"><span class="k"><kbd>↵</kbd></span>Responder a todos</div>
+        <div class="key"><span class="k"><kbd>F</kbd></span>Encaminhar</div>
+        <div class="key"><span class="k"><kbd>E</kbd></span>Arquivar / feito</div>
+        <div class="key"><span class="k"><kbd>#</kbd></span>Apagar</div>
+        <div class="key"><span class="k"><kbd>!</kbd></span>Spam</div>
+        <div class="key"><span class="k"><kbd>S</kbd></span>Estrela</div>
+        <div class="key"><span class="k"><kbd>J</kbd><kbd>K</kbd></span>Navegar</div>
+        <div class="key"><span class="k"><kbd>X</kbd></span>Selecionar</div>
+        <div class="key"><span class="k"><kbd>/</kbd></span>Buscar</div>
+        <div class="key"><span class="k"><kbd>L</kbd></span>Rotular</div>
+        <div class="key"><span class="k"><kbd>V</kbd></span>Mover</div>
+        <div class="key"><span class="k"><kbd>Z</kbd></span>Desfazer</div>
+        <div class="key diff"><span class="k"><kbd>H</kbd></span>Lembrar depois</div>
+        <div class="key diff"><span class="k"><kbd>U</kbd></span>Lido / não lido</div>
+        <div class="key diff"><span class="k"><kbd>Tab</kbd></span>Próxima aba</div>
+        <div class="key diff"><span class="k"><kbd>⌘</kbd><kbd>K</kbd></span>Paleta</div>
+        <div class="key"><span class="k"><kbd>G</kbd><kbd>I</kbd></span>Ir para Inbox</div>
+        <div class="key"><span class="k"><kbd>G</kbd><kbd>D</kbd></span>Ir para rascunhos</div>
+      </div>
+      <div class="legend"><span><i></i>Igual ao Gmail</span><span><i class="diff"></i>Diferente no Superhuman</span></div>
+      <div class="callout">A lista oficial do Superhuman não pôde ser lida em texto. Esses atalhos vêm de listas de terceiros, que discordam sobre o sentido de J e K. Em teclados ABNT2, teclas como <kbd>#</kbd>, <kbd>!</kbd> e <kbd>/</kbd> mudam de lugar.</div>
+
+      <h3>De onde vem a sensação de velocidade</h3>
+      <div class="stats">
+        <div class="stat"><div class="v">&lt;100 ms</div><div class="l">Limite para qualquer interação</div></div>
+        <div class="stat"><div class="v">&lt;50 ms</div><div class="l">Meta sempre que possível</div></div>
+        <div class="stat"><div class="v">30 min</div><div class="l">Onboarding 1:1 obrigatório no início do Superhuman</div></div>
+      </div>
+      <div class="prose"><ul>
+        <li>Banco de e-mails local como fonte da verdade, funcionando offline</li>
+        <li>Ação aplicada na tela na hora e enviada ao servidor numa fila</li>
+        <li>Pré-carregamento das conversas que o usuário provavelmente vai abrir</li>
+        <li>Animações mínimas e medição contínua de desempenho</li>
+        <li>Desfazer no lugar de pedir confirmação</li>
+      </ul></div>
+
+      <h3>Mac nativo hoje</h3>
+      <p>Apple Mail e Outlook para Mac dependem de combinações com vários modificadores (arquivar é <kbd>⌃</kbd><kbd>⌘</kbd><kbd>A</kbd> no Mail e <kbd>⌃</kbd><kbd>E</kbd> no Outlook). Nenhum tem modo de tecla única, paleta de comandos ou sequências G. O Spark é o mais completo: presets Spark, Apple Mail, Gmail e Superhuman, mais remapeamento livre.</p>
+
+      <h3>Quatro decisões para o MasterMail</h3>
+      <ul class="decisions">
+        <li><b>Presets</b>Núcleo compatível com Gmail, mais um preset Superhuman e remapeamento individual.</li>
+        <li><b>Menu do macOS</b>Todo comando no menu, com o atalho visível.</li>
+        <li><b>Paleta que ensina</b>Cmd+K com busca tolerante a erro e o atalho em cada linha.</li>
+        <li><b>Acessibilidade</b>Teclas únicas só com foco na lista ou no leitor, e opção de desligar (WCAG 2.1.4).</li>
+      </ul>
+      <p class="sources">Fontes: <a href="https://blog.superhuman.com/superhuman-is-built-for-speed/" target="_blank" rel="noopener">Superhuman: built for speed</a>, <a href="https://blog.superhuman.com/how-to-build-a-remarkable-command-palette/" target="_blank" rel="noopener">Superhuman: command palette</a>, <a href="https://support.google.com/mail/answer/6594" target="_blank" rel="noopener">Gmail Help</a>, <a href="https://pie-menu.com/shortcuts/superhuman" target="_blank" rel="noopener">pie-menu.com</a>, <a href="https://sparkmailapp.com/help/tips-tricks/use-keyboard-shortcuts" target="_blank" rel="noopener">Spark</a>, <a href="https://mimestream.com/help/user-guide/keyboard-shortcuts" target="_blank" rel="noopener">Mimestream</a>, <a href="https://www.w3.org/WAI/WCAG21/Understanding/character-key-shortcuts" target="_blank" rel="noopener">W3C</a>.</p>
+    </section>
+
+    <section id="ia">
+      <h2>Inteligência artificial</h2>
+      <p class="sub">Resumir e ajudar a escrever já são grátis no Gmail e na Apple. O diferencial pago é agir com contexto do inbox inteiro.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Produto</th><th>O que a IA faz</th><th>Preço</th><th>Onde roda</th></tr></thead>
+          <tbody>
+            <tr><td>Outlook + Copilot</td><td>Resumos com citações, rascunho, prioridade, thread vira convite</td><td class="num">US$ 18–30/usuário</td><td>Nuvem do tenant</td></tr>
+            <tr><td>Gmail + Gemini 3</td><td>Resumos e respostas grátis; perguntas ao inbox pagas</td><td class="num">Grátis / AI Pro</td><td>Nuvem</td></tr>
+            <tr><td>Apple Mail</td><td>Categorias, resumo no preview, Writing Tools</td><td class="num">Grátis</td><td>Aparelho</td></tr>
+            <tr><td>Superhuman</td><td>Respostas, resumos, rótulos; no Business: rascunhos automáticos e Ask AI</td><td class="num">US$ 30–40/mês</td><td>OpenAI, retenção zero</td></tr>
+            <tr><td>Shortwave</td><td>Assistente que responde sobre e-mails antigos</td><td class="num">US$ 18–120/mês</td><td>Nuvem</td></tr>
+            <tr><td>SaneBox</td><td>Triagem por metadados, sem ler o corpo</td><td class="num">US$ 7–36/mês</td><td>Servidor IMAP</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>O que incomoda nos recursos de IA</h3>
+      <div class="prose"><ul>
+        <li><strong>Imprecisão:</strong> resumos do Apple Mail falham em conversas encadeadas. A Apple suspendeu resumos de notícias após manchetes falsas da BBC.</li>
+        <li><strong>Falta de consentimento:</strong> ação coletiva de nov/2025 acusa o Google de ativar o Gemini no Gmail sem avisar.</li>
+        <li><strong>Ruído:</strong> rascunhos automáticos do Superhuman respondem até newsletters.</li>
+        <li><strong>Custo:</strong> Superhuman subiu 32% em 2024; Shortwave, 20 a 29% em 2026.</li>
+      </ul></div>
+
+      <h3>IA no aparelho vs. nuvem</h3>
+      <div class="stats">
+        <div class="stat warn"><div class="v">~4.096</div><div class="l">Tokens de contexto do modelo da Apple, somando entrada e saída</div></div>
+        <div class="stat"><div class="v">US$ 0</div><div class="l">Custo por uso do modelo no aparelho</div></div>
+      </div>
+      <p>O modelo da Apple serve para <strong>classificar uma mensagem, extrair datas e tarefas, detectar "precisa de resposta" e sinais de golpe</strong>. Não serve para resumir conversas longas nem responder perguntas sobre o inbox inteiro. Para isso, o caminho é busca semântica local e, com opt-in explícito, um modelo na nuvem. Falta confirmar se ele funciona bem em pt-BR.</p>
+
+      <h3>Validação de e-mails: lacuna aberta</h3>
+      <p>Nenhum cliente mostra de forma clara o resultado de SPF, DKIM e DMARC com uma explicação em linguagem simples. Esses dados já vêm no cabeçalho da mensagem, então um <strong>painel de confiança do remetente</strong> com explicação gerada no aparelho é viável sem servidor. Em pesquisa, a detecção de golpe por LLM chega a 99,7% num conjunto de teste, mas phishing reescrito por IA já engana os detectores antigos. O Outlook ainda não exibe BIMI.</p>
+      <p class="sources">Fontes: <a href="https://www.tomsguide.com/ai/gmails-biggest-update-in-20-years-5-ai-features-that-could-change-email-forever" target="_blank" rel="noopener">Tom's Guide</a>, <a href="https://eesel.ai/blog/copilot-pricing" target="_blank" rel="noopener">eesel</a>, <a href="https://help.superhuman.com/article/555-superhuman-ai-tutorial" target="_blank" rel="noopener">Superhuman Help</a>, <a href="https://developer.apple.com/tutorials/data/documentation/technotes/tn3193-managing-the-on-device-foundation-model-s-context-window.md" target="_blank" rel="noopener">Apple TN3193</a>, <a href="https://qz.com/google-lawsuit-gemini-ai-read-private-emails" target="_blank" rel="noopener">Quartz</a>, <a href="https://arxiv.org/pdf/2402.18093" target="_blank" rel="noopener">arXiv 2402.18093</a>, <a href="https://www.encryptionconsulting.com/bimi-with-vmc-and-cmc/" target="_blank" rel="noopener">Encryption Consulting</a>.</p>
+    </section>
+
+    <section id="mcp">
+      <h2>MCP e IA externa</h2>
+      <p class="sub">Os grandes provedores lançaram servidores MCP em 2026, e todos tratam o envio com cautela.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Quem</th><th>Status</th><th>Como trata o envio</th></tr></thead>
+          <tbody>
+            <tr><td>Gmail (Google)</td><td>Prévia</td><td>Não tem ferramenta de envio, só rascunho</td></tr>
+            <tr><td>Fastmail</td><td>Produção (abr/2026)</td><td>Leitura, escrita e envio liberados separadamente</td></tr>
+            <tr><td>Superhuman</td><td>Beta, plano Business</td><td>Cada envio exige aprovação</td></tr>
+            <tr><td>Microsoft Work IQ</td><td>Prévia</td><td>Exige licença Copilot e configuração do admin</td></tr>
+            <tr><td>Apple Mail</td><td>Só comunidade</td><td>AppleScript ou leitura do banco com acesso total ao disco</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout"><strong>Tríade letal:</strong> dados privados + conteúdo não confiável (todo e-mail recebido) + capacidade de enviar para fora. Já aconteceu: convites de calendário com instruções escondidas controlaram o Gemini, e o pacote <code>postmark-mcp</code> copiava em cópia oculta todo e-mail enviado para o atacante.</div>
+
+      <h3>Níveis de acesso por cliente conectado</h3>
+      <ol class="ladder">
+        <li><span class="lv">Desligado</span><span>O cliente não vê nenhuma ferramenta.</span></li>
+        <li><span class="lv">Só leitura</span><span>Buscar e ler mensagens e eventos.</span></li>
+        <li><span class="lv">Organizar</span><span>Arquivar, rotular, adiar.</span></li>
+        <li><span class="lv">Rascunhar</span><span>Criar rascunhos que o usuário revisa no app.</span></li>
+        <li><span class="lv">Enviar</span><span>Cada envio confirmado dentro do MasterMail, mostrando destinatários e corpo exatos.</span></li>
+      </ol>
+
+      <h3>Arquitetura proposta</h3>
+      <div class="flow">
+        <div class="box"><b>Host de IA</b>Claude Desktop, Claude Code, Cursor</div>
+        <span class="arrow">stdio →</span>
+        <div class="box"><b>Auxiliar MCP</b>Executável assinado dentro do app, sem credenciais</div>
+        <span class="arrow">XPC →</span>
+        <div class="box"><b>Camada de capacidades</b>No app principal: contas, Keychain, índice, política, auditoria</div>
+        <span class="arrow">←</span>
+        <div class="box"><b>App Intents</b>Siri, Atalhos, Spotlight usam a mesma camada</div>
+      </div>
+
+      <h3>Defesas</h3>
+      <div class="prose"><ul>
+        <li>Listar só as ferramentas que o nível do cliente permite</li>
+        <li>Confirmação dentro do MasterMail para enviar, encaminhar, apagar de vez, criar regra ou convidar externos</li>
+        <li>Devolver texto limpo: sem imagens remotas, sem HTML escondido, links neutralizados</li>
+        <li>Alertar quando aparece destinatário novo ou cópia oculta inesperada</li>
+        <li>Registro de auditoria com revogação em um clique</li>
+      </ul></div>
+      <p>A especificação MCP em vigor é a de 28/jul/2026. O SDK oficial em Swift ainda está antes da 1.0 e implementa a revisão anterior. Hoje a Apple Intelligence não chama MCP, e agentes externos não chamam App Intents. Uma camada única com dois adaptadores finos protege contra as duas possibilidades.</p>
+      <p class="sources">Fontes: <a href="https://developers.google.com/workspace/guides/configure-mcp-servers" target="_blank" rel="noopener">Google</a>, <a href="https://www.fastmail.help/hc/en-us/articles/15869557281295-Connecting-AI-tools-via-Fastmail-s-MCP-server" target="_blank" rel="noopener">Fastmail</a>, <a href="https://help.superhuman.com/hc/en-us/articles/49810745762067-Superhuman-Mail-MCP-Server-Beta" target="_blank" rel="noopener">Superhuman</a>, <a href="https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/" target="_blank" rel="noopener">Simon Willison</a>, <a href="https://www.theregister.com/2025/09/29/postmark_mcp_server_code_hijacked/" target="_blank" rel="noopener">The Register</a>, <a href="https://modelcontextprotocol.io/specification/2026-07-28/server/tools" target="_blank" rel="noopener">MCP spec</a>, <a href="https://github.com/modelcontextprotocol/swift-sdk" target="_blank" rel="noopener">swift-sdk</a>.</p>
+    </section>
+
+    <section id="microsoft">
+      <h2>Limites da Microsoft</h2>
+      <p class="sub">O Microsoft Graph é o único caminho viável. O gargalo técnico é a concorrência; o gargalo real é o consentimento.</p>
+      <div class="stats">
+        <div class="stat warn"><div class="v">4</div><div class="l">Requisições simultâneas por app e caixa postal</div></div>
+        <div class="stat"><div class="v">10.000</div><div class="l">Requisições a cada 10 minutos</div></div>
+        <div class="stat"><div class="v">150 MB</div><div class="l">Upload a cada 5 minutos</div></div>
+        <div class="stat"><div class="v">&lt;3 dias</div><div class="l">Validade de uma assinatura de notificação</div></div>
+        <div class="stat"><div class="v">macOS 14</div><div class="l">Mínimo do MSAL 2.x (iOS 17)</div></div>
+      </div>
+
+      <h3>Consentimento do administrador</h3>
+      <p>Desde novembro de 2025, a política padrão bloqueia o consentimento do usuário para <strong>Mail.Read, Mail.ReadWrite, Calendars.*, MailboxSettings e os acessos EWS, IMAP e POP</strong>. Mail.Send ficou fora da lista. Só uma lista curada escapa: Apple Mail, Spark, eM Client, Thunderbird e os apps de e-mail do Android e da Samsung, sem critério público para entrar.</p>
+      <div class="prose"><ul>
+        <li>Fazer a verificação de editor (publisher verification) cedo</li>
+        <li>Detectar o erro "precisa de aprovação" no login e oferecer a URL de consentimento pronta, mais um modelo de e-mail para o TI</li>
+        <li>Pedir permissões aos poucos: calendário só quando o usuário abrir o calendário</li>
+        <li>Contas pessoais Outlook.com não passam por essa política</li>
+      </ul></div>
+
+      <h3>Sincronização</h3>
+      <div class="prose"><ul>
+        <li>A sincronização incremental (delta) funciona uma pasta por vez e não aceita busca, o que exige índice local</li>
+        <li>O Graph não agrupa conversas: o app agrupa pelo identificador de conversa</li>
+        <li>Anexos acima de 3 MB exigem sessão de upload, até 150 MB</li>
+        <li>A busca automática de horários não funciona em contas pessoais</li>
+      </ul></div>
+
+      <h3>Notificações em tempo real</h3>
+      <p>O Graph só avisa de mudanças por webhook, uma URL pública que um app sozinho não tem. Sem servidor, o app consulta a cada 30 a 60 segundos quando está aberto e, no iOS, fica sujeito à atualização em segundo plano do sistema. A alternativa é um <strong>relay mínimo</strong> que recebe o aviso da Microsoft, sem conteúdo de e-mail, e manda um push silencioso para o aparelho sincronizar. Como notificação atrasada é a reclamação número um, essa decisão afeta diretamente a qualidade percebida.</p>
+      <div class="callout info">O ID de cliente público pode ficar no repositório (o Thunderbird publica o dele). Para evitar que forks usem o nome verificado do projeto, restrinja os endereços de retorno ao bundle do MasterMail e documente que forks registrem o próprio ID.</div>
+      <p class="sources">Fontes: <a href="https://learn.microsoft.com/en-us/graph/throttling-limits" target="_blank" rel="noopener">Graph throttling</a>, <a href="https://learn.microsoft.com/en-us/graph/delta-query-messages" target="_blank" rel="noopener">Delta query</a>, <a href="https://learn.microsoft.com/en-MY/graph/outlook-change-notifications-overview" target="_blank" rel="noopener">Change notifications</a>, <a href="https://entradiff.merill.net/changes/2026-08-28/manage-app-consent-policies-21/" target="_blank" rel="noopener">Entra docs</a>, <a href="https://learn.microsoft.com/en-ca/entra/identity-platform/publisher-verification-overview" target="_blank" rel="noopener">Publisher verification</a>, <a href="https://github.com/AzureAD/microsoft-authentication-library-for-objc" target="_blank" rel="noopener">MSAL objc</a>, <a href="https://support.mozilla.org/en-US/kb/microsoft-oauth-authentication-and-thunderbird-202/revision/275611" target="_blank" rel="noopener">Mozilla KB</a>.</p>
+    </section>
+
+    <section id="lacunas">
+      <h2>Oportunidades</h2>
+      <p class="sub">Um "Mimestream para Microsoft 365", com teclado no nível do Superhuman, IA local e MCP seguro. Thunderbird e MailMaven já anunciaram suporte ao Graph, então a janela não fica aberta para sempre.</p>
+      <ul class="gaps">
+        <li>Sincronização confiável via Graph com status de conta visível</li>
+        <li>Busca local completa, sem depender do Spotlight</li>
+        <li>Calendários compartilhados e delegados funcionando</li>
+        <li>Painel de confiança do remetente com SPF, DKIM e DMARC explicados</li>
+        <li>IA com opt-in claro, rotulada e de custo zero no aparelho</li>
+        <li>Servidor MCP local e seguro que cobre todas as contas</li>
+        <li>Automação nativa via Atalhos e App Intents</li>
+        <li>Open source: não pode ser vendido nem fechado</li>
+      </ul>
+      <div class="callout">Os dois gargalos estão em portas controladas por terceiros: o <strong>consentimento</strong> da Microsoft (começar por quem controla o próprio tenant e tratar a aprovação do TI como parte do produto) e o <strong>push</strong> (um relay mínimo sem conteúdo é provavelmente o preço de cumprir a promessa de velocidade).</div>
+    </section>
+
+    <section id="perguntas">
+      <h2>Perguntas em aberto</h2>
+      <p class="sub">O que a pesquisa não conseguiu responder e precisa de decisão ou teste.</p>
+      <ol class="questions">
+        <li><div><span class="tag">Microsoft</span>Como um app entra na lista de "clientes de e-mail populares" que dispensa aprovação do administrador?</div></li>
+        <li><div><span class="tag">Microsoft</span>Mail.Send sozinho ainda pode ser aprovado pelo usuário? Isso permitiria um modo mínimo antes do TI aprovar?</div></li>
+        <li><div><span class="tag">Arquitetura</span>Vamos operar um relay de push mínimo ou aceitar notificações atrasadas, principalmente no iOS?</div></li>
+        <li><div><span class="tag">Mercado</span>Quando a Apple lança o Graph no Mail do macOS 27, e com qual cobertura?</div></li>
+        <li><div><span class="tag">IA</span>O modelo da Apple funciona bem em pt-BR para classificar e explicar golpes? E em aparelhos sem Apple Intelligence?</div></li>
+        <li><div><span class="tag">IA</span>IA na nuvem com chave do próprio usuário, conta do projeto ou ambos? Como ficam as políticas de retenção de 2026?</div></li>
+        <li><div><span class="tag">MCP</span>Um auxiliar MCP dentro de um app da Mac App Store funciona quando chamado pelo Claude Desktop? A Apple aprova?</div></li>
+        <li><div><span class="tag">MCP</span>A Apple vai expor App Intents via MCP no macOS 27 ou depois?</div></li>
+        <li><div><span class="tag">Microsoft</span>Como contas Outlook.com se comportam em Caixa Prioritária, regras e links do Teams via Graph?</div></li>
+        <li><div><span class="tag">Microsoft</span>Quando o token delta expira na prática, e com que frequência um usuário recebe erro 429?</div></li>
+        <li><div><span class="tag">Mercado</span>Como Superhuman e Spark tratam caixas compartilhadas e calendários delegados?</div></li>
+        <li><div><span class="tag">Projeto</span>Como sustentar custos de verificação, relay e suporte num projeto open source?</div></li>
+        <li><div><span class="tag">Teclado</span>Qual layout de atalhos funciona bem em teclados ABNT2?</div></li>
+      </ol>
+    </section>
+
+    <footer>Pesquisa feita em outubro de 2026 a partir de documentação oficial, imprensa técnica e fóruns. Não foi possível ler Reddit e App Store diretamente. Relatório completo com todas as fontes: <code>docs/pesquisa/reports/</code> no repositório <a href="https://github.com/victortabs/mastermail" target="_blank" rel="noopener">victortabs/mastermail</a>.</footer>
+  </main>
+</div>
+
+<script>
+(function () {
+  var links = Array.prototype.slice.call(document.querySelectorAll('nav.toc a'));
+  if (!('IntersectionObserver' in window) || !links.length) return;
+  var map = {};
+  links.forEach(function (a) { map[a.getAttribute('href').slice(1)] = a; });
+  var obs = new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) {
+      if (e.isIntersecting) {
+        links.forEach(function (a) { a.classList.remove('active'); });
+        var a = map[e.target.id]; if (a) a.classList.add('active');
+      }
+    });
+  }, { rootMargin: '-20% 0px -70% 0px' });
+  document.querySelectorAll('main section[id]').forEach(function (s) { obs.observe(s); });
+})();
+</script>
