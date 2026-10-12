@@ -1,0 +1,33 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Xcode
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcscmblueprint
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Packages/
+Package.resolved.orig
+
+# Segredos — NUNCA commitar (repo público!)
+*.xcconfig.local
+Secrets.xcconfig
+.env
+.env.*
+*.p12
+*.mobileprovision
+
+# Claude Code (configurações pessoais da máquina)
+.claude/settings.local.json
