@@ -33,7 +33,7 @@ public enum RichText {
             return true
         }
         // "- " no começo da linha vira marcador de lista.
-        if let match = plain.firstMatch(of: /(?m)^- /) {
+        if let match = plain.firstMatch(of: /(?m)^-\ /) {
             let start = text.index(text.startIndex, offsetByCharacters: plain.distance(from: plain.startIndex, to: match.range.lowerBound))
             let end = text.index(start, offsetByCharacters: 2)
             text.replaceSubrange(start..<end, with: AttributedString("• "))
