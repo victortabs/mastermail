@@ -129,3 +129,16 @@ struct PhishingTests {
         #expect(HTMLText.phishingSignals(fromName: "Marina", fromAddress: "m@bdil.com.br", html: #"<a href="https://bdil.com.br/x">https://bdil.com.br/x</a>"#).isEmpty)
     }
 }
+
+struct ActionQueueTests {
+    @Test func queuePersistsAndRoundTrips() async {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("q-\(UUID().uuidString).json")
+        let q = ActionQueue(fileURL: url)
+        await q.enqueue(.markRead(id: "a", isRead: true))
+        await q.enqueue(.localFolder(id: "b", name: "Obras"))
+        #expect(await q.count == 2)
+        let reloaded = ActionQueue(fileURL: url)
+        #expect(await reloaded.count == 2)
+        #expect(await reloaded.items == [.markRead(id: "a", isRead: true), .localFolder(id: "b", name: "Obras")])
+    }
+}

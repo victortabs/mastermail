@@ -75,6 +75,16 @@ public extension GraphClient {
     }
 
     /// Reenviar: rascunho novo com assunto, corpo e destinatários da mensagem.
+    /// MIME completo da mensagem (.eml), para encaminhar como anexo.
+    func mime(messageID: String) async throws -> Data {
+        var request = URLRequest(url: Self.baseURL.appendingPathComponent("me/messages/\(messageID)/$value"))
+        request.setValue("Bearer \(try await bearer())", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200 ..< 300).contains(status) else { throw GraphError.http(status: status, body: String(decoding: data, as: UTF8.self)) }
+        return data
+    }
+
     func createResend(of m: Message) async throws -> Message {
         let draft = try await createDraft()
         try await updateDraft(id: draft.id, DraftPatch(subject: m.subject, toRecipients: m.toRecipients, ccRecipients: m.ccRecipients, body: m.body))

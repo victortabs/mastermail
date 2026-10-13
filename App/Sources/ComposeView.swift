@@ -9,6 +9,7 @@ final class ComposeModel: Identifiable {
         case new
         case reply(messageID: String, all: Bool)
         case forward(messageID: String)
+        case forwardAsAttachment(messageID: String)
         case resend(messageID: String)
     }
 
@@ -37,7 +38,7 @@ final class ComposeModel: Identifiable {
         case .new: "Nova mensagem"
         case .reply(_, true): "Responder"
         case .reply(_, false): "Responder ao remetente"
-        case .forward: "Encaminhar"
+        case .forward, .forwardAsAttachment: "Encaminhar"
         case .resend: "Reenviar"
         }
     }
@@ -56,6 +57,14 @@ final class ComposeModel: Identifiable {
             case let .reply(id, all): d = try await graph.createReply(to: id, all: all)
             case let .forward(id): d = try await graph.createForward(of: id)
             case let .resend(id): d = try await graph.createResend(of: graph.message(id: id))
+            case let .forwardAsAttachment(id):
+                let original = try await graph.message(id: id)
+                d = try await graph.createDraft()
+                try await graph.updateDraft(id: d.id, DraftPatch(subject: "FW: " + (original.subject ?? "")))
+                let eml = try await graph.mime(messageID: id)
+                try await graph.addAttachment(draftID: d.id, name: (original.subject ?? "mensagem") + ".eml", contentType: "message/rfc822", data: eml)
+                attachments.append((original.subject ?? "mensagem") + ".eml")
+                subject = "FW: " + (original.subject ?? "")
             }
             draft = d
             to = (d.toRecipients ?? []).map(\.display).joined(separator: ", ")

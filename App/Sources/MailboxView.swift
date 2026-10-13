@@ -193,6 +193,7 @@ struct MailboxView: View {
             .init("Atalhos", "?") { showHelp = true },
             .init("Aba lateral", "⌘⇧A") { model.showAssistant.toggle() },
             .init("Reenviar", "") { if let id = targetID { model.startCompose(.resend(messageID: id)) } },
+            .init("Encaminhar como anexo", "") { if let id = targetID { model.startCompose(.forwardAsAttachment(messageID: id)) } },
         ]
     }
 }
@@ -324,7 +325,9 @@ struct FolderList: View {
             Button("Cancelar", role: .cancel) { renaming = nil }
         }
         .safeAreaInset(edge: .bottom) {
-            if !model.aiStatus.isEmpty {
+            if model.pendingCount > 0 {
+                Label("\(model.pendingCount) ação(ões) aguardando conexão", systemImage: "wifi.slash").font(.caption2).foregroundStyle(.orange).padding(6).frame(maxWidth: .infinity).background(.bar)
+            } else if !model.aiStatus.isEmpty {
                 Text("IA: \(model.aiStatus)").font(.caption2).foregroundStyle(.secondary).lineLimit(2).padding(6).frame(maxWidth: .infinity).background(.bar)
             } else if model.isSyncing {
                 HStack(spacing: 6) {
@@ -475,6 +478,7 @@ struct MessageList: View {
                     Button("Arquivar") { Task { await model.move(message.id, to: .archive) } }
                     Button(message.isFlagged ? "Tirar sinalizador" : "Sinalizar") { Task { await model.toggleFlag(message.id) } }
                     Button("Reenviar") { model.startCompose(.resend(messageID: message.id)) }
+                    Button("Encaminhar como anexo") { model.startCompose(.forwardAsAttachment(messageID: message.id)) }
                     Button("Apagar", role: .destructive) { Task { await model.move(message.id, to: .deleteditems) } }
                 }
         }

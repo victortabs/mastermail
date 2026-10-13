@@ -13,7 +13,7 @@
 | Consentimento fácil para outros usuários: detectar bloqueio do admin, oferecer URL de consentimento e texto para o TI | Must | Escopos pedidos aos poucos. **✅** |
 | Sincronização por polling (30–60 s) com o app aberto | Must | Sem servidor próprio. **✅** |
 | Painel de saúde da sincronização; falha de envio ruidosa; caixa de saída visível | Must | Dor nº 2 da pesquisa. **✅** rodapé de indexação, Caixa de saída com tentar de novo, alerta e atenção no Dock |
-| Fila offline: ação local imediata, servidor depois | Must | **⬜** |
+| Fila offline: ação local imediata, servidor depois | Must | **✅** fila persistida, drenada a cada ciclo |
 | Múltiplas contas / caixa unificada | Won't | Decisão explícita; v2. |
 | Caixa compartilhada, calendário delegado | Won't | Usuário não usa. |
 
@@ -23,7 +23,7 @@
 | Caixa de entrada = mensagens não tratadas (sem Pasta local, não arquivadas, não Ruído) | Must | **✅** |
 | Conversa cronológica com Ramos explícitos e "em resposta a" | Must | Agrupar por `conversationIndex`; cabeçalhos como fallback. **✅** |
 | `R` = Responder (a todos); `⌘R` = Responder ao remetente; aviso ao remover participante | Must | **✅** |
-| Encaminhar, inclusive como anexo | Must | **🟡 encaminhar sim; como anexo não** |
+| Encaminhar, inclusive como anexo | Must | **✅** |
 | Lido/não lido, sinalizador, lixo eletrônico, apagar, arquivar (servidor) | Must | Arquivar nunca é automático. **✅** |
 | Pastas do servidor: só leitura. Nunca mover nem criar. | Must | **✅** |
 | Pasta local: uma por mensagem, gravada na mensagem no servidor | Must | ADR 0006. Mensagem lida com Pasta local sai da Caixa de entrada. **✅** |

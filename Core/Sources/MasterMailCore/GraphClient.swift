@@ -92,6 +92,9 @@ public actor GraphClient {
         return data
     }
 
+    /// Token válido para chamadas feitas fora do cliente (ex.: download de MIME).
+    public func bearer() async throws -> String { try await validAccessToken() }
+
     private func validAccessToken() async throws -> String {
         guard var current = tokens else { throw GraphError.notSignedIn }
         if current.isExpired {

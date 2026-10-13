@@ -92,6 +92,9 @@ final class AppModel {
     var showAssistant = false
     private let mac = MacCalendar()
     private(set) var failedSends: [FailedSend] = []
+    /// Fila offline (requisito): escritas no servidor que falharam por rede, repetidas a cada ciclo.
+    private let queue = ActionQueue.default()
+    private(set) var pendingCount = 0
     /// Remetentes (endereço ou domínio) cujas imagens remotas o usuário liberou de vez.
     var trustedImageSenders: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "trustedImageSenders") ?? [])
     private(set) var aiStatus = ""
@@ -254,7 +257,7 @@ final class AppModel {
             try store.setLocalFolder(id: id, name)
             reloadLocalFolders()
             removeFromList(id)
-            try await graph?.setLocalFolder(id: id, name)
+            await server(.localFolder(id: id, name: name)) { try await graph?.setLocalFolder(id: id, name) }
             pushUndo(name.map { "Movida para \($0)" } ?? "Tirada da pasta local") { [weak self] in
                 guard let self else { return }
                 try? store.setLocalFolder(id: id, old)
@@ -276,6 +279,7 @@ final class AppModel {
                 guard let self else { return }
                 var ids = Set([wellKnown[.inbox], selectedFolderID].compactMap { $0 })
                 if tick % 10 == 9 { ids.formUnion(folders.map(\.id)) }
+                await drainQueue()
                 for id in ids { await syncFolder(id) }
                 if tick % 10 == 9 { await loadFolders() }
                 if tick % 5 == 4 { await calendar?.loadToday() }
@@ -373,7 +377,7 @@ final class AppModel {
             refreshCounters()
             if let tipo = m.tipo.flatMap(Tipo.init(rawValue:)) {
                 let categories = Array(Set(m.categories + [tipo.label]))
-                try await graph?.setCategories(id: id, categories)
+                await server(.categories(id: id, categories: categories)) { try await graph?.setCategories(id: id, categories) }
             }
             pushUndo("Confirmado como \(m.tipo.flatMap(Tipo.init(rawValue:))?.label ?? "ruído")") { [weak self] in
                 try? self?.store.markNotNoise(id: id)
@@ -625,6 +629,27 @@ final class AppModel {
         return remoteImagesAllowed.contains(m.id) || trustedImageSenders.contains(m.fromAddress.lowercased()) || trustedImageSenders.contains(domain)
     }
 
+    /// Executa no servidor; sem rede, enfileira e segue (a ação local já aconteceu).
+    private func server(_ action: PendingAction, _ call: () async throws -> Void) async {
+        do {
+            try await call()
+        } catch let error as GraphError {
+            if case let .http(status, _) = error, (400 ..< 500).contains(status) { errorMessage = error.localizedDescription; return }
+            await queue.enqueue(action); pendingCount = await queue.count
+            showToast("Sem conexão: fica na fila (\(pendingCount))")
+        } catch {
+            await queue.enqueue(action); pendingCount = await queue.count
+            showToast("Sem conexão: fica na fila (\(pendingCount))")
+        }
+    }
+
+    func drainQueue() async {
+        guard let graph, await queue.count > 0 else { return }
+        let done = await queue.drain(using: graph)
+        pendingCount = await queue.count
+        if done > 0 { showToast("\(done) ação(ões) pendente(s) enviada(s)") }
+    }
+
     // MARK: Ações (local primeiro, servidor depois, todas com desfazer)
 
     func setRead(_ id: String, _ isRead: Bool) async {
@@ -632,7 +657,7 @@ final class AppModel {
             try store.setRead(id: id, isRead)
             if let i = messages.firstIndex(where: { $0.id == id }) { messages[i].isRead = isRead }
             if openMessage?.id == id { openMessage?.isRead = isRead }
-            try await graph?.markRead(id: id, isRead)
+            await server(.markRead(id: id, isRead: isRead)) { try await graph?.markRead(id: id, isRead) }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -644,7 +669,7 @@ final class AppModel {
         do {
             try store.setFlagged(id: id, flagged)
             if let i = messages.firstIndex(where: { $0.id == id }) { messages[i].isFlagged = flagged }
-            try await graph?.setFlag(id: id, flagged)
+            await server(.flag(id: id, flagged: flagged)) { try await graph?.setFlag(id: id, flagged) }
         } catch {
             errorMessage = error.localizedDescription
         }
