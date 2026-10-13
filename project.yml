@@ -1,0 +1,50 @@
+name: MasterMail
+options:
+  bundleIdPrefix: io.github.victortabs
+  deploymentTarget:
+    macOS: "26.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+packages:
+  MasterMailCore:
+    path: Core
+configFiles:
+  Debug: App/Config.xcconfig
+  Release: App/Config.xcconfig
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MACOSX_DEPLOYMENT_TARGET: "26.0"
+    # ADR 0007: assinatura ad-hoc, sem Team ID, sem Hardened Runtime.
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGN_STYLE: Manual
+    DEVELOPMENT_TEAM: ""
+    ENABLE_HARDENED_RUNTIME: NO
+    ENABLE_APP_SANDBOX: NO
+targets:
+  MasterMail:
+    type: application
+    platform: macOS
+    sources:
+      - App/Sources
+    dependencies:
+      - package: MasterMailCore
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: MasterMail
+        CFBundleName: MasterMail
+        LSMinimumSystemVersion: "26.0"
+        NSHumanReadableCopyright: "GPL-3.0-or-later"
+        # Client ID público do Entra (ADR 0007). Forks registram o próprio e trocam em App/Config.xcconfig.
+        MasterMailClientID: $(MASTERMAIL_CLIENT_ID)
+        CFBundleURLTypes:
+          - CFBundleURLName: io.github.victortabs.mastermail.auth
+            CFBundleURLSchemes:
+              - msauth.io.github.victortabs.mastermail
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.victortabs.mastermail
+        SWIFT_STRICT_CONCURRENCY: complete
+    scheme:
+      testTargets: []

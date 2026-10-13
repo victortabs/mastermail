@@ -6,7 +6,19 @@ brew install gh swiftlint swiftformat xcodegen
 gh auth login
 git clone https://github.com/victortabs/mastermail.git ~/Developer/mastermail
 ```
-Requer Xcode 26 ou mais novo (Mac com Apple silicon).
+Requer Xcode 26 ou mais novo (Mac com Apple silicon) e macOS 26+.
+
+## Compilar e rodar
+```
+xcodegen generate
+xcodebuild -project MasterMail.xcodeproj -scheme MasterMail -configuration Debug -derivedDataPath build/DerivedData build
+open build/DerivedData/Build/Products/Debug/MasterMail.app
+```
+Se o `xcode-select` apontar para o Command Line Tools, prefixe os comandos com `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`.
+
+Testes do núcleo: `cd Core && swift test`.
+
+Primeiro login: precisa do Client ID do Entra, ver [03-entra.md](03-entra.md).
 
 Para o plugin do GitHub funcionar, adicione ao `~/.zshrc`:
 ```

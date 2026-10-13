@@ -1,0 +1,3 @@
+// Client ID público do app registrado no Entra (não é segredo; ver ADR 0007 e docs/03-entra.md).
+// Vazio = o app pede o ID na primeira abertura e guarda em UserDefaults.
+MASTERMAIL_CLIENT_ID =

@@ -31,3 +31,6 @@ Secrets.xcconfig
 
 # Claude Code (configurações pessoais da máquina)
 .claude/settings.local.json
+
+# Gerado pelo XcodeGen a partir de project.yml
+*.xcodeproj
