@@ -53,7 +53,7 @@ final class AppModel {
     var compose: ComposeModel?
     private var sync: MailSync?
     private let tokenStore = TokenStore.default()
-    private let store: MailStore
+    let store: MailStore
     private var pollTask: Task<Void, Never>?
     private var backfillTask: Task<Void, Never>?
     private static let pageSize = 300

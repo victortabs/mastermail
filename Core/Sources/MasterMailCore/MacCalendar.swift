@@ -18,8 +18,11 @@ public final class MacCalendar {
         (try? await store.requestFullAccessToReminders()) ?? false
     }
 
+    /// Só calendários que NÃO são Exchange: a conta Microsoft já vem pelo Graph, senão cada evento aparece duas vezes.
     public func events(from start: Date, to end: Date) -> [CalendarEvent] {
-        let predicate = store.predicateForEvents(withStart: start, end: end, calendars: nil)
+        let calendars = store.calendars(for: .event).filter { $0.source.sourceType != .exchange }
+        guard !calendars.isEmpty else { return [] }
+        let predicate = store.predicateForEvents(withStart: start, end: end, calendars: calendars)
         return store.events(matching: predicate).map { e in
             CalendarEvent(
                 id: "mac:" + (e.eventIdentifier ?? UUID().uuidString) + ":" + String(Int(e.startDate.timeIntervalSince1970)),

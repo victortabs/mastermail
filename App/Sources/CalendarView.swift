@@ -43,7 +43,9 @@ final class CalendarModel {
         do {
             async let ms = graph.events(from: range.start, to: range.end)
             let macEvents = macAccess ? mac.events(from: range.start, to: range.end) : []
-            events = (try await ms + macEvents).sorted { $0.start < $1.start }
+            // Segunda barreira contra duplicata: mesmo título e mesmo início contam uma vez só (fica o da Microsoft).
+            var seen = Set<String>()
+            events = (try await ms + macEvents).filter { seen.insert("\($0.title)|\(Int($0.start.timeIntervalSince1970))").inserted }.sorted { $0.start < $1.start }
             await loadToday()
         } catch {
             self.error = error.localizedDescription
