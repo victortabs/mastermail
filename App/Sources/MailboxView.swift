@@ -36,8 +36,8 @@ struct MailboxView: View {
                 }
             }
         } detail: {
-            if let message = model.openMessage {
-                MessageDetail(message: message)
+            if model.openMessage != nil {
+                ConversationView()
             } else {
                 ContentUnavailableView("Nenhuma mensagem aberta", systemImage: "envelope.open")
             }
@@ -83,29 +83,5 @@ struct MessageRow: View {
                 .font(.caption).foregroundStyle(.secondary).lineLimit(2)
         }
         .padding(.vertical, 2)
-    }
-}
-
-struct MessageDetail: View {
-    let message: StoredMessage
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(message.subject.isEmpty ? "(sem assunto)" : message.subject).font(.title2.bold())
-            HStack {
-                Text(message.fromName).fontWeight(.semibold)
-                Text(message.fromAddress).foregroundStyle(.secondary)
-                Spacer()
-                Text(message.receivedAt, format: .dateTime).foregroundStyle(.secondary)
-            }
-            .font(.callout)
-            if !message.recipients.isEmpty {
-                Text("Para: " + message.recipients)
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(2)
-            }
-            Divider()
-            MessageBodyView(html: message.bodyHTML, text: message.bodyText)
-        }
-        .padding()
     }
 }

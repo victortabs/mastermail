@@ -27,6 +27,8 @@ public struct MailSync: Sendable {
             total += page.value.count
             progress?(total)
             if let next = page.nextLink {
+                // Guarda o nextLink: se o app fechar no meio do backfill, retoma daqui.
+                try store.setDeltaLink(next, for: folder)
                 url = next
             } else if let delta = page.deltaLink {
                 try store.setDeltaLink(delta, for: folder)

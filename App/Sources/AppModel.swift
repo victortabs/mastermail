@@ -16,6 +16,9 @@ final class AppModel {
     private(set) var phase: Phase = .needsClientID
     private(set) var messages: [StoredMessage] = []
     private(set) var openMessage: StoredMessage?
+    /// A Conversa da mensagem aberta, cronológica, com Ramos.
+    private(set) var conversation: [ConversationNode] = []
+    var expanded: Set<String> = []
     private(set) var isSyncing = false
     /// Quantidade de mensagens processadas na sincronização em curso (primeira indexação é longa).
     private(set) var syncProgress = 0
@@ -150,12 +153,38 @@ final class AppModel {
 
     func open(_ message: StoredMessage) async {
         openMessage = message
-        guard !message.isRead, let graph else { return }
+        expanded = [message.id]
         do {
-            try store.setRead(id: message.id, true)
-            if let i = messages.firstIndex(where: { $0.id == message.id }) { messages[i].isRead = true }
-            openMessage?.isRead = true
-            try await graph.markRead(id: message.id)
+            let thread = try message.conversationId.map { try store.conversation(id: $0) } ?? [message]
+            conversation = ConversationTree.build(thread.isEmpty ? [message] : thread)
+            await ensureHTML(id: message.id)
+            if !message.isRead, let graph {
+                try store.setRead(id: message.id, true)
+                if let i = messages.firstIndex(where: { $0.id == message.id }) { messages[i].isRead = true }
+                openMessage?.isRead = true
+                try await graph.markRead(id: message.id)
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func toggle(_ id: String) async {
+        if expanded.contains(id) { expanded.remove(id); return }
+        expanded.insert(id)
+        await ensureHTML(id: id)
+    }
+
+    /// Mensagem fora da retenção de HTML: baixa o corpo na hora e guarda.
+    private func ensureHTML(id: String) async {
+        guard let i = conversation.firstIndex(where: { $0.id == id }),
+              conversation[i].message.bodyHTML == nil, let graph else { return }
+        do {
+            guard let html = try await graph.bodyHTML(id: id) else { return }
+            var m = conversation[i].message
+            m.bodyHTML = html
+            try store.upsert([m])
+            if conversation.indices.contains(i), conversation[i].id == id { conversation[i].message = m }
         } catch {
             errorMessage = error.localizedDescription
         }

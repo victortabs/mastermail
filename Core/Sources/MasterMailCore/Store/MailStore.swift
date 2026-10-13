@@ -18,8 +18,10 @@ public struct StoredMessage: Codable, Sendable, Hashable, Identifiable, Fetchabl
     public var hasAttachments: Bool
     public var preview: String
     public var bodyText: String
-    // ponytail: HTML de tudo. Requisito diz "só 12 meses"; podar quando o disco pesar.
+    /// HTML só dos últimos 12 meses (requisito); mais antigo fica nil e é baixado ao abrir.
     public var bodyHTML: String?
+
+    public static let htmlRetention: TimeInterval = 365 * 86400
 
     public init(message m: Message, folder: String) {
         id = m.id
@@ -40,7 +42,7 @@ public struct StoredMessage: Codable, Sendable, Hashable, Identifiable, Fetchabl
         preview = m.bodyPreview ?? ""
         if let body = m.body {
             if body.contentType.lowercased() == "html" {
-                bodyHTML = body.content
+                bodyHTML = m.receivedDateTime.timeIntervalSinceNow > -Self.htmlRetention ? body.content : nil
                 bodyText = HTMLText.plainText(from: body.content)
             } else {
                 bodyHTML = nil
@@ -131,6 +133,13 @@ public final class MailStore: Sendable {
 
     public func message(id: String) throws -> StoredMessage? {
         try pool.read { db in try StoredMessage.fetchOne(db, key: id) }
+    }
+
+    /// Mensagens de uma Conversa, em ordem cronológica.
+    public func conversation(id: String) throws -> [StoredMessage] {
+        try pool.read { db in
+            try StoredMessage.filter(Column("conversationId") == id).order(Column("receivedAt")).fetchAll(db)
+        }
     }
 
     public func count(in folder: String) throws -> Int {
