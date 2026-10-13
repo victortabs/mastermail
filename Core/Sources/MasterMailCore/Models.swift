@@ -77,6 +77,8 @@ public struct Message: Codable, Sendable, Hashable, Identifiable {
     public var conversationIndex: String?
     public var categories: [String]?
     public var flag: Flag?
+    /// Só em mensagens de reunião: meetingRequest, meetingCancelled, meetingAccepted... (eventMessage do Graph).
+    public var meetingMessageType: String?
     public var body: ItemBody?
     public var singleValueExtendedProperties: [ExtendedProperty]?
 
@@ -91,7 +93,7 @@ public struct Message: Codable, Sendable, Hashable, Identifiable {
 
     public static let listFields = [
         "id", "subject", "from", "toRecipients", "ccRecipients", "receivedDateTime",
-        "bodyPreview", "isRead", "hasAttachments", "conversationId", "conversationIndex", "categories", "flag",
+        "bodyPreview", "isRead", "hasAttachments", "conversationId", "conversationIndex", "categories", "flag", "meetingMessageType",
     ].joined(separator: ",")
 }
 

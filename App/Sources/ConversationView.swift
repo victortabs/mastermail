@@ -86,6 +86,7 @@ struct MessageCard: View {
                 if !m.recipients.isEmpty {
                     Text("Para: " + m.recipients).font(.caption).foregroundStyle(.secondary).lineLimit(3)
                 }
+                if m.meetingMessageType == "meetingRequest" { InviteBar(messageID: m.id) }
                 HStack(spacing: 8) {
                     Button { reminderSheet = true } label: { Label("Lembrete", systemImage: "checklist") }
                     Button { eventSheet = true } label: { Label("Evento", systemImage: "calendar.badge.plus") }
@@ -115,6 +116,61 @@ struct MessageCard: View {
             if let cal = model.calendar {
                 EventEditor(cal: cal, defaultStart: Date(), prefillTitle: m.subject, prefillAttendees: ([m.fromAddress] + Recipient.parseList(m.recipients).compactMap(\.emailAddress.address)).filter { $0.lowercased() != model.accountEmail }.joined(separator: ", "), prefillNotes: m.preview)
             }
+        }
+    }
+}
+
+/// Convite recebido por e-mail: Aceitar / Talvez / Recusar atualizam a Agenda Microsoft (requisito).
+struct InviteBar: View {
+    @Environment(AppModel.self) private var model
+    let messageID: String
+    @State private var event: CalendarEvent?
+    @State private var done = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "calendar.badge.exclamationmark").foregroundStyle(.blue)
+            if let event {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(event.title).font(.callout.weight(.semibold))
+                    Text("\(event.start.formatted(.dateTime.weekday(.abbreviated).day().month().hour().minute())) – \(event.end.formatted(date: .omitted, time: .shortened))\(event.location.map { " · \($0)" } ?? "")")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                if done || (event.response != nil && event.response != "notResponded" && event.response != "none") {
+                    Text(label(event.response)).font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Button("Aceitar") { respond(event, "accept") }.buttonStyle(.borderedProminent)
+                    Button("Talvez") { respond(event, "tentativelyAccept") }
+                    Button("Recusar") { respond(event, "decline") }
+                }
+            } else {
+                Text("Convite de reunião").font(.callout)
+                Spacer()
+                ProgressView().controlSize(.small)
+            }
+        }
+        .controlSize(.small)
+        .padding(8)
+        .background(Color.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+        .task(id: messageID) { event = try? await model.client?.event(forMeetingMessage: messageID) }
+    }
+
+    private func label(_ r: String?) -> String {
+        switch r {
+        case "accepted": "Aceito"
+        case "tentativelyAccepted": "Talvez"
+        case "declined": "Recusado"
+        case "organizer": "Você organiza"
+        default: ""
+        }
+    }
+
+    private func respond(_ e: CalendarEvent, _ action: String) {
+        Task {
+            await model.calendar?.respond(e, action)
+            done = true
+            model.showToast(action == "accept" ? "Aceito e na agenda" : action == "decline" ? "Recusado" : "Marcado como talvez")
         }
     }
 }

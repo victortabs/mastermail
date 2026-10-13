@@ -24,6 +24,7 @@ public struct StoredMessage: Codable, Sendable, Hashable, Identifiable, Fetchabl
     /// Adiar (CONTEXT.md): escondida da Caixa de entrada até esta hora. Só local.
     public var snoozedUntil: Date?
     public var isFlagged: Bool = false
+    public var meetingMessageType: String?
     public var bodyText: String
     /// HTML só dos últimos 12 meses (requisito); mais antigo fica nil e é baixado ao abrir.
     public var bodyHTML: String?
@@ -56,6 +57,7 @@ public struct StoredMessage: Codable, Sendable, Hashable, Identifiable, Fetchabl
         categories = m.categories ?? []
         localFolder = m.localFolder
         isFlagged = m.isFlagged
+        meetingMessageType = m.meetingMessageType
         if let body = m.body {
             if body.contentType.lowercased() == "html" {
                 bodyHTML = m.receivedDateTime.timeIntervalSinceNow > -Self.htmlRetention ? body.content : nil
@@ -180,6 +182,9 @@ public final class MailStore: Sendable {
         }
         migrator.registerMigration("people-1", migrate: migratePeople)
         registerAIMigrations(&migrator)
+        migrator.registerMigration("v5") { db in
+            try db.alter(table: "message") { t in t.add(column: "meetingMessageType", .text) }
+        }
         return migrator
     }
 

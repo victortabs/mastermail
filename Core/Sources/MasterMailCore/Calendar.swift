@@ -144,6 +144,16 @@ public extension GraphClient {
         try await delete("me/events/\(id)")
     }
 
+    /// O evento ligado a uma mensagem de convite (eventMessage), se existir.
+    func event(forMeetingMessage id: String) async throws -> CalendarEvent? {
+        struct Wrapper: Decodable { var event: GraphEvent? }
+        let w: Wrapper = try await get("me/messages/\(id)", query: [
+            .init(name: "$select", value: "id"),
+            .init(name: "$expand", value: "microsoft.graph.eventMessage/event"),
+        ], headers: Self.calendarHeaders)
+        return w.event?.event
+    }
+
     /// accept, decline ou tentativelyAccept.
     func respond(eventID: String, _ action: String, comment: String? = nil) async throws {
         let body = ["sendResponse": true, "comment": comment ?? ""] as [String: Any]
