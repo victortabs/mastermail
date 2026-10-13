@@ -56,8 +56,44 @@ struct SignInView: View {
             Text("Conecte sua conta Microsoft 365.").foregroundStyle(.secondary)
             Button("Entrar com a Microsoft") { Task { await model.signIn() } }
                 .keyboardShortcut(.defaultAction)
+            if let url = model.adminConsentURL {
+                AdminConsentHelp(url: url)
+            }
         }
         .padding(40)
+    }
+}
+
+/// A Microsoft bloqueia o consentimento de usuário para e-mail desde nov/2025: o TI precisa aprovar uma vez.
+struct AdminConsentHelp: View {
+    let url: URL
+    @State private var copied = false
+
+    private var message: String {
+        """
+        Oi, preciso que você aprove o MasterMail para a nossa organização no Microsoft 365. \
+        É um cliente de e-mail open source (GPL) que roda só no meu Mac e acessa minha caixa pelo Microsoft Graph \
+        com as permissões Mail.ReadWrite, Mail.Send, Calendars.ReadWrite, Contacts.Read, User.Read e offline_access. \
+        Basta abrir este link com uma conta de administrador e clicar em Aceitar:
+        \(url.absoluteString)
+        """
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Sua organização exige aprovação do administrador.", systemImage: "lock.shield").font(.headline)
+            Text("Mande o texto abaixo para o TI. Depois da aprovação, clique em Entrar de novo.").font(.caption).foregroundStyle(.secondary)
+            Text(message).font(.caption).textSelection(.enabled).padding(8).background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
+            HStack {
+                Button(copied ? "Copiado" : "Copiar texto") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(message, forType: .string)
+                    copied = true
+                }
+                Link("Abrir o link de aprovação (se você for o admin)", destination: url).font(.caption)
+            }
+        }
+        .frame(maxWidth: 520)
     }
 }
 

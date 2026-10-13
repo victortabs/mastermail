@@ -62,6 +62,8 @@ final class AppModel {
     private(set) var syncStatus = ""
     var searchText = "" { didSet { if searchText != oldValue { Task { await reloadList() } } } }
     var errorMessage: String?
+    /// O tenant pediu aprovação do administrador: URL de consentimento para mandar ao TI.
+    var adminConsentURL: URL?
 
     /// Composição em curso. Responder/encaminhar aparecem inline na Conversa; nova mensagem em sheet.
     var compose: ComposeModel?
@@ -141,6 +143,8 @@ final class AppModel {
             try await graph.signIn(tokens)
             await loadAccount()
         } catch ASWebAuthenticationSessionError.canceledLogin {
+        } catch let error as OAuthError where error.needsAdminConsent {
+            adminConsentURL = OAuth.adminConsentURL(config: config)
         } catch {
             errorMessage = error.localizedDescription
         }

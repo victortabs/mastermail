@@ -6,12 +6,23 @@ public struct DraftPatch: Encodable, Sendable {
     public var toRecipients: [Recipient]?
     public var ccRecipients: [Recipient]?
     public var body: ItemBody?
+    public var singleValueExtendedProperties: [ExtendedProperty]?
 
-    public init(subject: String? = nil, toRecipients: [Recipient]? = nil, ccRecipients: [Recipient]? = nil, body: ItemBody? = nil) {
+    public init(subject: String? = nil, toRecipients: [Recipient]? = nil, ccRecipients: [Recipient]? = nil, body: ItemBody? = nil, sendAt: Date? = nil) {
         self.subject = subject
         self.toRecipients = toRecipients
         self.ccRecipients = ccRecipients
         self.body = body
+        if let sendAt { singleValueExtendedProperties = [ExtendedProperty.deferredSend(at: sendAt)] }
+    }
+}
+
+public extension ExtendedProperty {
+    /// PidTagDeferredSendTime: o servidor segura a mensagem até a hora, mesmo com o app fechado. Fica em Rascunhos até lá.
+    static let deferredSendID = "SystemTime 0x3FEF"
+
+    static func deferredSend(at date: Date) -> ExtendedProperty {
+        ExtendedProperty(id: deferredSendID, value: ISO8601DateFormatter().string(from: date))
     }
 }
 

@@ -43,6 +43,8 @@ final class ComposeModel: Identifiable {
     }
 
     private(set) var attachments: [String] = []
+    /// Envio programado: o servidor segura até esta hora (requisito).
+    var sendAt: Date?
 
     var hasContent: Bool { !String(body.characters).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
@@ -99,7 +101,7 @@ final class ComposeModel: Identifiable {
             let html = RichText.html(from: body) + signatureHTML + "<br>" + quoted
             try await graph.updateDraft(id: draft.id, DraftPatch(
                 subject: subject, toRecipients: currentRecipients.to, ccRecipients: currentRecipients.cc,
-                body: ItemBody(contentType: "html", content: html)
+                body: ItemBody(contentType: "html", content: html), sendAt: sendAt
             ))
             try await graph.send(draftID: draft.id)
         } catch {
@@ -139,6 +141,8 @@ struct ComposeEditor: View {
     @State private var confirmRemoved = false
     @State private var confirmDiscard = false
     @State private var showSubject = false
+    @State private var scheduling = false
+    @State private var scheduleDate = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: Calendar.current.date(byAdding: .day, value: 1, to: Date())!)!
     private enum Field { case to, body }
     @FocusState private var focus: Field?
 
@@ -178,6 +182,19 @@ struct ComposeEditor: View {
                 Spacer()
                 Button("Descartar") { if model.hasContent { confirmDiscard = true } else { discard() } }
                     .keyboardShortcut(.escape, modifiers: [])
+                Button(model.sendAt.map { "Enviar em \($0.formatted(.dateTime.day().month().hour().minute()))" } ?? "Enviar depois…") { scheduling = true }
+                    .popover(isPresented: $scheduling) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            DatePicker("Enviar em", selection: $scheduleDate, in: Date()...)
+                            HStack {
+                                if model.sendAt != nil { Button("Enviar agora") { model.sendAt = nil; scheduling = false } }
+                                Spacer()
+                                Button("Programar") { model.sendAt = scheduleDate; scheduling = false }.keyboardShortcut(.defaultAction)
+                            }
+                            Text("O servidor segura a mensagem; pode fechar o app. Até lá ela fica em Rascunhos.").font(.caption).foregroundStyle(.secondary)
+                        }
+                        .padding().frame(width: 320)
+                    }
                 if case let .reply(id, _) = model.mode {
                     Button("Enviar e arquivar") { trySend(thenArchive: id) }
                         .keyboardShortcut(.return, modifiers: [.command, .shift])

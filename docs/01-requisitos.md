@@ -10,7 +10,7 @@
 | Requisito | Prioridade | Notas |
 |---|---|---|
 | Login com uma conta Microsoft 365 (trabalho), OAuth próprio sem MSAL | Must | ADR 0003 (Graph) + ADR 0007 (login). **✅** |
-| Consentimento fácil para outros usuários: detectar bloqueio do admin, oferecer URL de consentimento e texto para o TI | Must | Escopos pedidos aos poucos. **⬜** |
+| Consentimento fácil para outros usuários: detectar bloqueio do admin, oferecer URL de consentimento e texto para o TI | Must | Escopos pedidos aos poucos. **✅** |
 | Sincronização por polling (30–60 s) com o app aberto | Must | Sem servidor próprio. **✅** |
 | Painel de saúde da sincronização; falha de envio ruidosa; caixa de saída visível | Must | Dor nº 2 da pesquisa. **🟡 rodapé mostra indexação; falta falha de envio ruidosa e caixa de saída** |
 | Fila offline: ação local imediata, servidor depois | Must | **⬜** |
@@ -31,7 +31,7 @@
 | Lista "sem resposta sua" e "sem resposta deles há N dias", com lembrete que se cancela ao chegar resposta | Must | Mesma consulta ao Índice local. **✅ (listas; lembrete que se cancela: ⬜)** |
 | Anexos: anexar, pré-visualizar (Quick Look), baixar; buscar por nome do anexo | Must | **🟡 abrir/salvar/anexar até 3 MB; Quick Look e nome no índice: ⬜** |
 | Desfazer envio (timer) e desfazer ações (`z`) | Must | **✅** |
-| Envio programado (servidor segura; fica em Rascunhos, editável) | Must | Via propriedade de envio adiado do Graph. **⬜** |
+| Envio programado (servidor segura; fica em Rascunhos, editável) | Must | Via propriedade de envio adiado do Graph. **✅** |
 | Rascunhos sincronizados no servidor | Must | **✅** |
 | Cancelar inscrição em um clique | Must | List-Unsubscribe. **✅** |
 | Imagens remotas bloqueadas por padrão; liberar por remetente/Organização | Must | **🟡 por mensagem; por remetente/Organização: ⬜** |
@@ -72,7 +72,7 @@
 | Categoria atribuída pela IA, gravada no servidor (visível no celular) | Must | **✅ (ao confirmar na Triagem)** |
 | Sugestão sempre com Justificativa; usuário aceita com uma tecla | Must | **✅** |
 | Explicação do usuário vira Regra (determinística, zero tokens) | Must | **✅** |
-| Regra promovida a automática por decisão do usuário | Must | **🟡 campo existe; sem UI** |
+| Regra promovida a automática por decisão do usuário | Must | **✅** (⌘, → Regras) |
 | Triagem: visão do Ruído ainda não confirmado, com contador | Must | **✅** |
 | Importante (julgado pela IA pelo conteúdo) → única notificação do Mac | Must | Sem modelo, sem notificação. **✅** |
 | Contador do dia no ícone do Dock | Must | **✅** |

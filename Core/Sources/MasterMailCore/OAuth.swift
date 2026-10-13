@@ -50,6 +50,15 @@ public enum OAuthError: Error, LocalizedError, Sendable {
     case server(code: String, description: String?)
     case invalidResponse(status: Int)
 
+    /// AADSTS65001 / AADSTS90094: o tenant exige consentimento de administrador para este app.
+    public var needsAdminConsent: Bool {
+        if case let .server(code, description) = self {
+            let text = code + " " + (description ?? "")
+            return text.contains("65001") || text.contains("90094") || code == "consent_required" || code == "access_denied" && text.lowercased().contains("admin")
+        }
+        return false
+    }
+
     public var errorDescription: String? {
         switch self {
         case .invalidCallback: "O login não devolveu um código de autorização."
@@ -62,6 +71,13 @@ public enum OAuthError: Error, LocalizedError, Sendable {
 
 /// Fluxo Authorization Code + PKCE contra o endpoint v2 do Entra. Funções puras; quem abre o navegador é o app.
 public enum OAuth {
+    /// URL que um administrador abre para consentir o app para a organização inteira.
+    public static func adminConsentURL(config: OAuthConfig) -> URL {
+        var c = URLComponents(string: "https://login.microsoftonline.com/\(config.tenant == "common" ? "organizations" : config.tenant)/adminconsent")!
+        c.queryItems = [.init(name: "client_id", value: config.clientID), .init(name: "redirect_uri", value: config.redirectURI)]
+        return c.url!
+    }
+
     public static func authorizationURL(config: OAuthConfig, pkce: PKCE, state: String) -> URL {
         var components = URLComponents(url: config.authorizeURL, resolvingAgainstBaseURL: false)!
         components.queryItems = [

@@ -47,6 +47,8 @@ public actor ClassificationPipeline {
             if let rule = RulesEngine.match(m, rules: try store.rules()), let tipo = rule.tipo.flatMap(Tipo.init(rawValue:)) {
                 let c = Classification(tipo: tipo, justificativa: rule.explanation ?? "\(rule.field.rawValue) = \(rule.value)", categoria: rule.categoria)
                 try store.saveClassification(id: m.id, c, byRule: true)
+                // Regra promovida a automática (requisito): Ruído já sai confirmado, sem passar pela Triagem.
+                if rule.automatic, tipo.isRuido { try store.confirmTriage(id: m.id) }
                 if let rid = rule.id { try store.countRuleHit(id: rid) }
                 return true
             }
