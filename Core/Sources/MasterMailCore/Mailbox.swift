@@ -42,6 +42,49 @@ public extension GraphClient {
         return m.body?.contentType.lowercased() == "html" ? m.body?.content : nil
     }
 
+    /// Lista de anexos sem os bytes (para mostrar; baixar é à parte).
+    func attachments(messageID: String) async throws -> [Attachment] {
+        let page: GraphPage<Attachment> = try await get("me/messages/\(messageID)/attachments", query: [
+            .init(name: "$select", value: "id,name,contentType,size,isInline,contentId"),
+        ])
+        return page.value.filter { $0.isInline != true }
+    }
+
+    /// Bytes de um anexo.
+    func attachmentData(messageID: String, attachmentID: String) async throws -> Data {
+        let a: Attachment = try await get("me/messages/\(messageID)/attachments/\(attachmentID)")
+        guard let bytes = a.contentBytes, let data = Data(base64Encoded: bytes) else { throw GraphError.http(status: 0, body: "anexo sem bytes") }
+        return data
+    }
+
+    /// Anexa um arquivo a um rascunho (até 3 MB por esta rota; maior exige sessão de upload).
+    func addAttachment(draftID: String, name: String, contentType: String, data: Data) async throws {
+        let body: [String: Any] = ["@odata.type": "#microsoft.graph.fileAttachment", "name": name, "contentType": contentType, "contentBytes": data.base64EncodedString()]
+        try await post("me/messages/\(draftID)/attachments", json: JSONSerialization.data(withJSONObject: body))
+    }
+
+    /// Cabeçalho List-Unsubscribe da mensagem (mailto: e/ou https:), se existir.
+    func unsubscribeTargets(messageID: String) async throws -> [URL] {
+        struct Header: Decodable { var name: String; var value: String }
+        struct Headers: Decodable { var internetMessageHeaders: [Header]? }
+        let h: Headers = try await get("me/messages/\(messageID)", query: [.init(name: "$select", value: "internetMessageHeaders")])
+        guard let value = h.internetMessageHeaders?.first(where: { $0.name.caseInsensitiveCompare("List-Unsubscribe") == .orderedSame })?.value else { return [] }
+        return value.split(separator: ",").compactMap { part in
+            URL(string: part.trimmingCharacters(in: CharacterSet(charactersIn: " <>")))
+        }
+    }
+
+    /// Reenviar: rascunho novo com assunto, corpo e destinatários da mensagem.
+    func createResend(of m: Message) async throws -> Message {
+        let draft = try await createDraft()
+        try await updateDraft(id: draft.id, DraftPatch(subject: m.subject, toRecipients: m.toRecipients, ccRecipients: m.ccRecipients, body: m.body))
+        return try await get("me/messages/\(draft.id)", query: [.init(name: "$select", value: Message.listFields + ",body")])
+    }
+
+    func message(id: String) async throws -> Message {
+        try await get("me/messages/\(id)", query: [.init(name: "$select", value: Message.listFields + ",body")])
+    }
+
     /// Anexos inline (imagens de assinatura etc.), com bytes.
     func inlineAttachments(messageID: String) async throws -> [Attachment] {
         let page: GraphPage<Attachment> = try await get("me/messages/\(messageID)/attachments", query: [

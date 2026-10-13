@@ -27,7 +27,8 @@ struct MailboxView: View {
                 ContentUnavailableView("Nenhuma mensagem aberta", systemImage: "envelope.open", description: Text("j / k navegam · Enter entra na conversa · ? mostra os atalhos"))
             }
         }
-        .searchable(text: $model.searchText, placement: .toolbar, prompt: "Buscar no Índice local")
+        .inspector(isPresented: $model.showAssistant) { AssistantPanel().inspectorColumnWidth(min: 280, ideal: 340) }
+        .searchable(text: $model.searchText, placement: .toolbar, prompt: "Buscar: texto, from:, to:, org:, has:anexo, after:, before:, in:")
         .searchFocused($searchFocused)
         .navigationTitle(model.searchText.isEmpty ? title : "Busca")
         .navigationSubtitle(account)
@@ -42,6 +43,7 @@ struct MailboxView: View {
                 Button { if let id = targetID { model.startCompose(.forward(messageID: id)) } } label: { Label("Encaminhar", systemImage: "arrowshape.turn.up.right") }.disabled(targetID == nil)
             }
             ToolbarItemGroup {
+                Button { model.showAssistant.toggle() } label: { Label("Aba lateral", systemImage: "sparkles") }.keyboardShortcut("a", modifiers: [.command, .shift])
                 Button { showPalette = true } label: { Label("Paleta de comandos", systemImage: "command") }.keyboardShortcut("k", modifiers: .command)
                 Button { Task { await model.refresh() } } label: { Label("Atualizar", systemImage: "arrow.clockwise") }.keyboardShortcut("r", modifiers: [.command, .shift])
             }
@@ -184,6 +186,8 @@ struct MailboxView: View {
             .init("Calendário", "⌘2") { model.view = .calendar },
             .init("Pessoas", "⌘3") { model.view = .people },
             .init("Atalhos", "?") { showHelp = true },
+            .init("Aba lateral", "⌘⇧A") { model.showAssistant.toggle() },
+            .init("Reenviar", "") { if let id = targetID { model.startCompose(.resend(messageID: id)) } },
         ]
     }
 }
@@ -434,6 +438,7 @@ struct MessageList: View {
                     }
                     Button("Arquivar") { Task { await model.move(message.id, to: .archive) } }
                     Button(message.isFlagged ? "Tirar sinalizador" : "Sinalizar") { Task { await model.toggleFlag(message.id) } }
+                    Button("Reenviar") { model.startCompose(.resend(messageID: message.id)) }
                     Button("Apagar", role: .destructive) { Task { await model.move(message.id, to: .deleteditems) } }
                 }
         }

@@ -51,6 +51,9 @@ struct MessageCard: View {
     let isNewest: Bool
     let isFocused: Bool
     @State private var bodyHeight: CGFloat = 200
+    @State private var attachments: [Attachment] = []
+    @State private var reminderSheet = false
+    @State private var eventSheet = false
 
     private var m: StoredMessage { node.message }
 
@@ -83,6 +86,18 @@ struct MessageCard: View {
                 if !m.recipients.isEmpty {
                     Text("Para: " + m.recipients).font(.caption).foregroundStyle(.secondary).lineLimit(3)
                 }
+                HStack(spacing: 8) {
+                    Button { reminderSheet = true } label: { Label("Lembrete", systemImage: "checklist") }
+                    Button { eventSheet = true } label: { Label("Evento", systemImage: "calendar.badge.plus") }
+                    if let tipo = m.tipo.flatMap(Tipo.init(rawValue:)), tipo == .newsletter || tipo == .promocao {
+                        Button { Task { await model.unsubscribe(m) } } label: { Label("Cancelar inscrição", systemImage: "xmark.circle") }
+                    }
+                    Spacer()
+                }
+                .controlSize(.small)
+                if m.hasAttachments {
+                    AttachmentStrip(messageID: m.id, attachments: $attachments)
+                }
                 let allowRemote = model.remoteImagesAllowed.contains(m.id)
                 if let html = m.bodyHTML, !allowRemote, html.contains("http") {
                     Button("Mostrar imagens remotas") { model.remoteImagesAllowed.insert(m.id) }.controlSize(.small)
@@ -95,6 +110,86 @@ struct MessageCard: View {
         .padding(12)
         .background(isNewest ? Color.accentColor.opacity(0.06) : Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(isFocused ? Color.accentColor : (node.isBranch ? Color.orange.opacity(0.5) : Color.gray.opacity(0.2)), lineWidth: isFocused ? 2 : 1))
+        .sheet(isPresented: $reminderSheet) { ReminderSheet(message: m) }
+        .sheet(isPresented: $eventSheet) {
+            if let cal = model.calendar {
+                EventEditor(cal: cal, defaultStart: Date(), prefillTitle: m.subject, prefillAttendees: ([m.fromAddress] + Recipient.parseList(m.recipients).compactMap(\.emailAddress.address)).filter { $0.lowercased() != model.accountEmail }.joined(separator: ", "), prefillNotes: m.preview)
+            }
+        }
+    }
+}
+
+/// Anexos não-inline: nome e tamanho; clique abre com o app padrão (baixa para a pasta temporária); "Salvar" vai para Downloads.
+struct AttachmentStrip: View {
+    @Environment(AppModel.self) private var model
+    let messageID: String
+    @Binding var attachments: [Attachment]
+    @State private var busy: String?
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(attachments) { a in
+                Menu {
+                    Button("Abrir") { Task { await open(a, save: false) } }
+                    Button("Salvar em Downloads") { Task { await open(a, save: true) } }
+                } label: {
+                    Label("\(a.name ?? "anexo")\(a.size.map { " · \(ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .file))" } ?? "")", systemImage: busy == a.id ? "arrow.down.circle" : "paperclip")
+                        .font(.caption)
+                }
+                .menuStyle(.borderlessButton).fixedSize()
+            }
+            if attachments.isEmpty { Text("carregando anexos…").font(.caption).foregroundStyle(.tertiary) }
+        }
+        .task(id: messageID) {
+            if attachments.isEmpty, let graph = model.client {
+                attachments = (try? await graph.attachments(messageID: messageID)) ?? []
+            }
+        }
+    }
+
+    private func open(_ a: Attachment, save: Bool) async {
+        guard let graph = model.client else { return }
+        busy = a.id
+        defer { busy = nil }
+        do {
+            let data = try await graph.attachmentData(messageID: messageID, attachmentID: a.id)
+            let dir = save ? FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
+                           : FileManager.default.temporaryDirectory.appendingPathComponent("MasterMail", isDirectory: true)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            var url = dir.appendingPathComponent(a.name ?? "anexo")
+            var n = 1
+            while save, FileManager.default.fileExists(atPath: url.path) {
+                url = dir.appendingPathComponent("\((a.name ?? "anexo") as NSString).deletingPathExtension) \(n).\(((a.name ?? "") as NSString).pathExtension)"); n += 1
+            }
+            try data.write(to: url)
+            if save { model.showToast("Salvo em Downloads: \(url.lastPathComponent)") } else { NSWorkspace.shared.open(url) }
+        } catch {
+            model.errorMessage = error.localizedDescription
+        }
+    }
+}
+
+/// Lembrete a partir da mensagem (CONTEXT.md: nasce no Lembretes.app).
+struct ReminderSheet: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    let message: StoredMessage
+    @State private var withDue = true
+    @State private var due = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: Calendar.current.date(byAdding: .day, value: 1, to: Date())!)!
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Lembrete").font(.headline)
+            Text(message.subject.isEmpty ? "(sem assunto)" : message.subject).lineLimit(2)
+            Toggle("Com data", isOn: $withDue)
+            DatePicker("Quando", selection: $due).disabled(!withDue)
+            HStack {
+                Spacer()
+                Button("Cancelar") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Criar") { Task { await model.createReminder(from: message, due: withDue ? due : nil); dismiss() } }.keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding().frame(width: 360)
     }
 }
 

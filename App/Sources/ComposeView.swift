@@ -9,6 +9,7 @@ final class ComposeModel: Identifiable {
         case new
         case reply(messageID: String, all: Bool)
         case forward(messageID: String)
+        case resend(messageID: String)
     }
 
     let id = UUID()
@@ -37,8 +38,11 @@ final class ComposeModel: Identifiable {
         case .reply(_, true): "Responder"
         case .reply(_, false): "Responder ao remetente"
         case .forward: "Encaminhar"
+        case .resend: "Reenviar"
         }
     }
+
+    private(set) var attachments: [String] = []
 
     var hasContent: Bool { !String(body.characters).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
@@ -49,6 +53,7 @@ final class ComposeModel: Identifiable {
             case .new: d = try await graph.createDraft()
             case let .reply(id, all): d = try await graph.createReply(to: id, all: all)
             case let .forward(id): d = try await graph.createForward(of: id)
+            case let .resend(id): d = try await graph.createResend(of: graph.message(id: id))
             }
             draft = d
             to = (d.toRecipients ?? []).map(\.display).joined(separator: ", ")
@@ -102,6 +107,24 @@ final class ComposeModel: Identifiable {
         }
     }
 
+    /// Anexa um arquivo ao rascunho (até 3 MB nesta rota).
+    func attach(_ url: URL) async {
+        guard let draft else { return }
+        do {
+            let data = try Data(contentsOf: url)
+            guard data.count <= 3_000_000 else { error = "Anexo acima de 3 MB ainda não é suportado."; return }
+            let type = UTTypeFor(url)
+            try await graph.addAttachment(draftID: draft.id, name: url.lastPathComponent, contentType: type, data: data)
+            attachments.append(url.lastPathComponent)
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func UTTypeFor(_ url: URL) -> String {
+        (try? url.resourceValues(forKeys: [.contentTypeKey]).contentType?.preferredMIMEType) ?? "application/octet-stream"
+    }
+
     func discard() async {
         guard let draft else { return }
         try? await graph.deleteDraft(id: draft.id)
@@ -143,12 +166,23 @@ struct ComposeEditor: View {
                 .scrollContentBackground(.hidden)
                 .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
                 .onChange(of: model.body) { _, _ in model.applyShortcuts() }
+            if !model.attachments.isEmpty {
+                HStack(spacing: 6) {
+                    ForEach(model.attachments, id: \.self) { Label($0, systemImage: "paperclip").font(.caption) }
+                }
+            }
             HStack {
+                Button { pickAttachment() } label: { Label("Anexar", systemImage: "paperclip") }.disabled(model.draft == nil)
                 Text(model.mode == .new ? "Assinatura entra no fim." : "Assinatura e histórico citado entram abaixo do seu texto.")
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button("Descartar") { if model.hasContent { confirmDiscard = true } else { discard() } }
                     .keyboardShortcut(.escape, modifiers: [])
+                if case let .reply(id, _) = model.mode {
+                    Button("Enviar e arquivar") { trySend(thenArchive: id) }
+                        .keyboardShortcut(.return, modifiers: [.command, .shift])
+                        .disabled(model.isBusy || model.draft == nil)
+                }
                 Button("Enviar") { trySend() }
                     .keyboardShortcut(.return, modifiers: .command)
                     .buttonStyle(.borderedProminent)
@@ -174,9 +208,22 @@ struct ComposeEditor: View {
         .onChange(of: model.isBusy) { _, busy in if !busy { focus = model.mode == .new ? .to : .body } }
     }
 
-    private func trySend() {
+    private func trySend(thenArchive: String? = nil) {
         model.removedParticipants = model.checkRemovedParticipants()
-        if model.removedParticipants.isEmpty { app.scheduleSend(model) } else { confirmRemoved = true }
+        if model.removedParticipants.isEmpty {
+            app.scheduleSend(model)
+            if let id = thenArchive { Task { await app.move(id, to: .archive) } }
+        } else {
+            confirmRemoved = true
+        }
+    }
+
+    private func pickAttachment() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        guard panel.runModal() == .OK else { return }
+        Task { for url in panel.urls { await model.attach(url) } }
     }
 
     private func discard() {

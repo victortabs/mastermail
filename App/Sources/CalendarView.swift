@@ -291,7 +291,7 @@ struct EventEditor: View {
     @State private var attendees = ""
     @State private var notes = ""
 
-    init(cal: CalendarModel, defaultStart: Date) {
+    init(cal: CalendarModel, defaultStart: Date, prefillTitle: String = "", prefillAttendees: String = "", prefillNotes: String = "") {
         self.cal = cal
         self.defaultStart = defaultStart
         let c = Calendar.current
@@ -299,6 +299,9 @@ struct EventEditor: View {
         let s = c.isDateInToday(defaultStart) ? next : c.date(bySettingHour: 9, minute: 0, second: 0, of: defaultStart)!
         _start = State(initialValue: s)
         _end = State(initialValue: c.date(byAdding: .hour, value: 1, to: s)!)
+        _title = State(initialValue: prefillTitle)
+        _attendees = State(initialValue: prefillAttendees)
+        _notes = State(initialValue: prefillNotes)
     }
 
     var body: some View {

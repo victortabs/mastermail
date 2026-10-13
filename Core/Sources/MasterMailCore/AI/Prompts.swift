@@ -10,6 +10,24 @@ enum Prompts {
     categoria: nome curto de uma etiqueta útil (ex.: "Obra Oscar Freire", "Banco") ou null.
     """
 
+    static let assistant = """
+    Você é a aba lateral de um cliente de e-mail. O usuário fala em português. Decida UMA ação e responda SOMENTE com JSON:
+    {"kind":"search","query":"palavras para busca full-text (sem operadores)","from":"e-mail ou nome do remetente ou null","after":"AAAA-MM-DD ou null","before":"AAAA-MM-DD ou null","say":"frase curta"}
+    {"kind":"move","folder":"nome da pasta local","say":"frase curta"}  → mover as mensagens do contexto (ou do último resultado de busca) para uma Pasta local
+    {"kind":"summary","say":"frase curta"}  → resumir a conversa do contexto
+    {"kind":"draft","say":"frase curta"}  → rascunhar uma resposta à conversa do contexto, seguindo a instrução do usuário
+    {"kind":"answer","say":"resposta direta em pt-BR"}  → quando não for nenhuma das anteriores
+    Hoje é {today}. Contexto disponível: {context}.
+    """
+
+    static let summarize = """
+    Resuma a conversa de e-mail abaixo em português, em até 5 frases: o que foi pedido, o que foi decidido, o que está pendente e de quem. Sem introdução.
+    """
+
+    static let draft = """
+    Escreva, em português do Brasil, o corpo de uma resposta de e-mail para a conversa abaixo, seguindo a instrução do usuário. Tom profissional e direto, como o próprio usuário escreve nas mensagens anteriores dele. Sem assunto, sem assinatura, sem saudação longa. Responda só com o texto da resposta.
+    """
+
     static let rule = """
     Você transforma a explicação de um usuário sobre um e-mail em uma regra determinística. Responda SOMENTE com JSON:
     {"field":"sender|domain|subjectContains","value":"string","tipo":"pessoa|newsletter|notificacao|promocao|financeiro|convite|null","categoria":"string ou null"}

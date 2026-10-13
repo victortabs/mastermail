@@ -77,6 +77,9 @@ final class AppModel {
     let aiSettings = AISettingsStore.default()
     private(set) var pipeline: ClassificationPipeline?
     private(set) var triageCount = 0
+    let assistant = AssistantModel()
+    var showAssistant = false
+    private let mac = MacCalendar()
     private(set) var aiStatus = ""
     private var notified: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "notifiedIDs") ?? [])
     private var sync: MailSync?
@@ -415,7 +418,7 @@ final class AppModel {
                 messages = page
                 hasMore = page.count == Self.pageSize
             } else {
-                messages = try store.search(searchText)
+                messages = try store.search(SearchQuery.parse(searchText))
                 hasMore = false
             }
         } catch {
@@ -432,6 +435,12 @@ final class AppModel {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    /// Resultado de uma busca da Aba lateral substitui a lista.
+    func showResults(_ results: [StoredMessage]) {
+        messages = results
+        hasMore = false
     }
 
     private func removeFromList(_ id: String) {
@@ -520,6 +529,40 @@ final class AppModel {
             task.cancel()
             self?.pendingSend = nil
             self?.showToast("Envio cancelado. O rascunho está em Rascunhos.")
+        }
+    }
+
+    // MARK: Tarefas e eventos a partir da mensagem
+
+    func createReminder(from m: StoredMessage, due: Date?) async {
+        guard await mac.requestRemindersAccess() else { errorMessage = "Sem acesso ao Lembretes. Libere em Ajustes do Sistema → Privacidade → Lembretes."; return }
+        do {
+            try mac.createReminder(title: m.subject.isEmpty ? "E-mail de \(m.fromName)" : m.subject, notes: "De \(m.fromName) <\(m.fromAddress)>\n\n\(m.preview)", due: due)
+            showToast("Lembrete criado")
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Cancelar inscrição em um clique: mailto envia um e-mail vazio; https abre no navegador.
+    func unsubscribe(_ m: StoredMessage) async {
+        guard let graph else { return }
+        do {
+            let targets = try await graph.unsubscribeTargets(messageID: m.id)
+            if let mailto = targets.first(where: { $0.scheme == "mailto" }) {
+                let address = mailto.absoluteString.replacingOccurrences(of: "mailto:", with: "").split(separator: "?").first.map(String.init) ?? ""
+                let draft = try await graph.createDraft()
+                try await graph.updateDraft(id: draft.id, DraftPatch(subject: "unsubscribe", toRecipients: [Recipient(parsing: address)], body: ItemBody(contentType: "text", content: "unsubscribe")))
+                try await graph.send(draftID: draft.id)
+                showToast("Pedido de cancelamento enviado para \(address)")
+            } else if let link = targets.first(where: { $0.scheme == "https" || $0.scheme == "http" }) {
+                NSWorkspace.shared.open(link)
+                showToast("Página de cancelamento aberta no navegador")
+            } else {
+                showToast("Esta mensagem não tem link de cancelamento")
+            }
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 

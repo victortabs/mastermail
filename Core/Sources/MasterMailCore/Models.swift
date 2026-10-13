@@ -127,13 +127,18 @@ public struct MailFolder: Decodable, Sendable, Hashable, Identifiable {
 }
 
 /// Anexo (só o que precisamos para imagens inline).
-public struct Attachment: Decodable, Sendable {
+public struct Attachment: Decodable, Sendable, Identifiable, Hashable {
     public var id: String
     public var name: String?
     public var contentType: String?
     public var contentId: String?
     public var isInline: Bool?
+    public var size: Int?
     public var contentBytes: String?
+
+    public init(id: String, name: String? = nil, contentType: String? = nil, contentId: String? = nil, isInline: Bool? = nil, size: Int? = nil, contentBytes: String? = nil) {
+        self.id = id; self.name = name; self.contentType = contentType; self.contentId = contentId; self.isInline = isInline; self.size = size; self.contentBytes = contentBytes
+    }
 }
 
 public struct User: Decodable, Sendable {
