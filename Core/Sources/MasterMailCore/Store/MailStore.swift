@@ -27,6 +27,12 @@ public struct StoredMessage: Codable, Sendable, Hashable, Identifiable, Fetchabl
     public var bodyText: String
     /// HTML só dos últimos 12 meses (requisito); mais antigo fica nil e é baixado ao abrir.
     public var bodyHTML: String?
+    // Camada de IA (CONTEXT.md: Tipo, Importante, Justificativa, Triagem). Preenchidos pela ClassificationPipeline.
+    public var tipo: String?
+    public var importante: Bool = false
+    public var justificativa: String?
+    public var classifiedAt: Date?
+    public var triagemConfirmada: Bool = false
 
     public static let htmlRetention: TimeInterval = 365 * 86400
 
@@ -173,6 +179,7 @@ public final class MailStore: Sendable {
             }
         }
         migrator.registerMigration("people-1", migrate: migratePeople)
+        registerAIMigrations(&migrator)
         return migrator
     }
 
@@ -323,10 +330,17 @@ public final class MailStore: Sendable {
     public func upsert(_ messages: [StoredMessage]) throws {
         try pool.write { db in
             for var m in messages {
+                // A sincronização recria o registro; o que é só local (Pasta local reconciliada, Adiar,
+                // classificação da IA) precisa sobreviver ao delta.
                 if let existing = try StoredMessage.fetchOne(db, key: m.id) {
                     if m.localFolder == nil { m.localFolder = existing.localFolder }
                     m.snoozedUntil = existing.snoozedUntil
                     if m.bodyHTML == nil { m.bodyHTML = existing.bodyHTML }
+                    m.tipo = existing.tipo
+                    m.importante = existing.importante
+                    m.justificativa = existing.justificativa
+                    m.classifiedAt = existing.classifiedAt
+                    m.triagemConfirmada = existing.triagemConfirmada
                 }
                 try m.save(db)
             }
