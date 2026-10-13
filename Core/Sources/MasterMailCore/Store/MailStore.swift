@@ -24,6 +24,12 @@ public struct StoredMessage: Codable, Sendable, Hashable, Identifiable, Fetchabl
     public var bodyText: String
     /// HTML só dos últimos 12 meses (requisito); mais antigo fica nil e é baixado ao abrir.
     public var bodyHTML: String?
+    // Camada de IA (CONTEXT.md: Tipo, Importante, Justificativa, Triagem). Preenchidos pela ClassificationPipeline.
+    public var tipo: String?
+    public var importante: Bool = false
+    public var justificativa: String?
+    public var classifiedAt: Date?
+    public var triagemConfirmada: Bool = false
 
     public static let htmlRetention: TimeInterval = 365 * 86400
 
@@ -162,6 +168,7 @@ public final class MailStore: Sendable {
             try db.alter(table: "message") { t in t.add(column: "localFolder", .text).indexed() }
             try db.create(table: "local_folder") { t in t.primaryKey("name", .text) }
         }
+        registerAIMigrations(&migrator)
         return migrator
     }
 
@@ -269,7 +276,17 @@ public final class MailStore: Sendable {
 
     public func upsert(_ messages: [StoredMessage]) throws {
         try pool.write { db in
-            for m in messages { try m.save(db) }
+            for var m in messages {
+                // A sincronização recria o registro; a classificação é só local e precisa sobreviver ao delta.
+                if let row = try Row.fetchOne(db, sql: "SELECT tipo, importante, justificativa, classifiedAt, triagemConfirmada FROM message WHERE id = ?", arguments: [m.id]) {
+                    m.tipo = row["tipo"]
+                    m.importante = row["importante"]
+                    m.justificativa = row["justificativa"]
+                    m.classifiedAt = row["classifiedAt"]
+                    m.triagemConfirmada = row["triagemConfirmada"]
+                }
+                try m.save(db)
+            }
         }
     }
 
