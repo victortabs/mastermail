@@ -14,7 +14,7 @@ struct RootView: View {
                 switch model.view {
                 case .mail: MailboxView(account: account)
                 case .calendar: CalendarView()
-                case .people: ContentUnavailableView("Pessoas", systemImage: "person.2", description: Text("Organizações e Contatos: em construção."))
+                case .people: PeopleView()
                 }
             }
         }

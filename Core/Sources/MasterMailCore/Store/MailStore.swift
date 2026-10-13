@@ -172,6 +172,7 @@ public final class MailStore: Sendable {
                 t.add(column: "isFlagged", .boolean).notNull().defaults(to: false)
             }
         }
+        migrator.registerMigration("people-1", migrate: migratePeople)
         return migrator
     }
 

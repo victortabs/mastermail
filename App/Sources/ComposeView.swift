@@ -127,8 +127,8 @@ struct ComposeEditor: View {
                 if model.isBusy { ProgressView().controlSize(.small) }
             }
             Grid(alignment: .leading, verticalSpacing: 4) {
-                GridRow { Text("Para").foregroundStyle(.secondary).gridColumnAlignment(.trailing); TextField("", text: $model.to).focused($focus, equals: .to) }
-                GridRow { Text("Cc").foregroundStyle(.secondary); TextField("", text: $model.cc) }
+                GridRow { Text("Para").foregroundStyle(.secondary).gridColumnAlignment(.trailing); RecipientField(prompt: "", text: $model.to).focused($focus, equals: .to) }
+                GridRow { Text("Cc").foregroundStyle(.secondary); RecipientField(prompt: "", text: $model.cc) }
                 if model.mode == .new || showSubject {
                     GridRow { Text("Assunto").foregroundStyle(.secondary); TextField("", text: $model.subject) }
                 } else {

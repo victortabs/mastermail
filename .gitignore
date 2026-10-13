@@ -34,3 +34,6 @@ Secrets.xcconfig
 
 # Gerado pelo XcodeGen a partir de project.yml
 *.xcodeproj
+
+# Cópias de trabalho dos agentes
+.claude/worktrees/
