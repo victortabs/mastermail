@@ -1,7 +1,9 @@
+import AppKit
 import AuthenticationServices
 import Foundation
 import MasterMailCore
 import Observation
+import UserNotifications
 
 /// Estado do app: conta, pastas, lista (do Índice local), Conversa aberta, composição, desfazer. Um só, na main thread.
 @MainActor
@@ -22,6 +24,8 @@ final class AppModel {
         case snoozed
         case awaitingMe
         case awaitingThem
+        case triage
+        case noise
     }
 
     /// Uma ação que pode ser desfeita com `z`.
@@ -69,6 +73,12 @@ final class AppModel {
 
     private var graph: GraphClient?
     var client: GraphClient? { graph }
+    /// IA (ADR 0004): Regra → modelo local → nuvem opt-in. Roda depois de cada sincronização da Caixa de entrada.
+    let aiSettings = AISettingsStore.default()
+    private(set) var pipeline: ClassificationPipeline?
+    private(set) var triageCount = 0
+    private(set) var aiStatus = ""
+    private var notified: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "notifiedIDs") ?? [])
     private var sync: MailSync?
     private let tokenStore = TokenStore.default()
     let store: MailStore
@@ -108,6 +118,7 @@ final class AppModel {
         graph = client
         sync = MailSync(graph: client, store: store)
         calendar = CalendarModel(graph: client)
+        pipeline = ClassificationPipeline(store: store, settings: aiSettings)
         phase = .signedOut
         Task { if await client.isSignedIn { await loadAccount() } }
     }
@@ -152,6 +163,7 @@ final class AppModel {
             await loadFolders()
             reloadLocalFolders()
             await folderChanged()
+            refreshCounters()
             startPolling()
             startBackfill()
             Task { await reconcileLocalFolders() }
@@ -290,6 +302,83 @@ final class AppModel {
                 Task { @MainActor in self?.syncStatus = "\(name): \(count)" }
             }
             if id == selectedFolderID { await reloadList() }
+            if id == wellKnown[.inbox] { await classifyInbox() }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: IA (Tipo, Importante, Triagem, Regras)
+
+    private func classifyInbox() async {
+        guard let pipeline, let inbox = wellKnown[.inbox] else { return }
+        let done = await pipeline.run(folder: inbox, max: 30)
+        if let error = await pipeline.lastError { aiStatus = error } else if done > 0 { aiStatus = "" }
+        refreshCounters()
+        if done > 0 {
+            if selection == .account(.inbox) || selection == .triage { await reloadList() }
+            await notifyImportant()
+        }
+    }
+
+    func refreshCounters() {
+        guard let inbox = wellKnown[.inbox] else { return }
+        triageCount = (try? store.triageCount(folder: inbox)) ?? 0
+        let today = (try? store.receivedToday(folder: inbox)) ?? 0
+        NSApplication.shared.dockTile.badgeLabel = today > 0 ? String(today) : nil
+    }
+
+    /// Notificação do Mac só para Importante (requisito), uma vez por mensagem.
+    private func notifyImportant() async {
+        guard let important = try? store.importantUnread(limit: 20) else { return }
+        let center = UNUserNotificationCenter.current()
+        let granted = (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
+        guard granted else { return }
+        for m in important where !notified.contains(m.id) {
+            let content = UNMutableNotificationContent()
+            content.title = m.fromName.isEmpty ? m.fromAddress : m.fromName
+            content.subtitle = m.subject
+            content.body = m.justificativa ?? m.preview
+            try? await center.add(UNNotificationRequest(identifier: m.id, content: content, trigger: nil))
+            notified.insert(m.id)
+        }
+        UserDefaults.standard.set(Array(notified.suffix(500)), forKey: "notifiedIDs")
+    }
+
+    /// `y` na Triagem: confirma o Ruído e grava o Tipo como Categoria no servidor (aparece no celular).
+    func confirmNoise(_ id: String) async {
+        guard let m = messages.first(where: { $0.id == id }) ?? (try? store.message(id: id)) else { return }
+        do {
+            try store.confirmTriage(id: id)
+            removeFromList(id)
+            refreshCounters()
+            if let tipo = m.tipo.flatMap(Tipo.init(rawValue:)) {
+                let categories = Array(Set(m.categories + [tipo.label]))
+                try await graph?.setCategories(id: id, categories)
+            }
+            pushUndo("Confirmado como \(m.tipo.flatMap(Tipo.init(rawValue:))?.label ?? "ruído")") { [weak self] in
+                try? self?.store.markNotNoise(id: id)
+                self?.refreshCounters()
+                await self?.reloadList()
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// `n` na Triagem: discorda. A Explicação vira Regra (zero tokens dali em diante) e a mensagem volta à Caixa de entrada.
+    func rejectNoise(_ id: String, explanation: String) async {
+        guard let m = messages.first(where: { $0.id == id }) ?? (try? store.message(id: id)) else { return }
+        do {
+            try store.markNotNoise(id: id)
+            removeFromList(id)
+            refreshCounters()
+            let text = explanation.trimmingCharacters(in: .whitespacesAndNewlines)
+            var rule = await RuleBuilder.fromExplanation(text, message: m, provider: pipeline?.provider())
+            rule.tipo = Tipo.pessoa.rawValue
+            if rule.explanation == nil || rule.explanation!.isEmpty { rule.explanation = text.isEmpty ? nil : text }
+            try store.saveRule(rule)
+            showToast("Regra criada: \(rule.field.rawValue) = \(rule.value) → Pessoa")
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -308,7 +397,10 @@ final class AppModel {
     private func page(offset: Int) throws -> [StoredMessage] {
         switch selection {
         case let .local(name): try store.messages(localFolder: name, limit: Self.pageSize, offset: offset)
+        case .account(.inbox): try wellKnown[.inbox].map { try store.inboxMessages(folder: $0, limit: Self.pageSize, offset: offset) } ?? []
         case .account: try selectedFolderID.map { try store.messages(in: $0, limit: Self.pageSize, offset: offset) } ?? []
+        case .triage: try wellKnown[.inbox].map { try store.triage(folder: $0, limit: Self.pageSize, offset: offset) } ?? []
+        case .noise: try wellKnown[.inbox].map { try store.noise(folder: $0, limit: Self.pageSize, offset: offset) } ?? []
         case .snoozed: offset == 0 ? try store.snoozed() : []
         case .awaitingMe: offset == 0 ? try store.awaitingMyReply(inbox: wellKnown[.inbox] ?? "", me: accountEmail) : []
         case .awaitingThem: offset == 0 ? try store.awaitingTheirReply(sent: wellKnown[.sentitems] ?? "", me: accountEmail) : []

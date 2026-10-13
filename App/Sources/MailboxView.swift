@@ -10,6 +10,7 @@ struct MailboxView: View {
     @State private var snoozingFor: String?
     @State private var showPalette = false
     @State private var showHelp = false
+    @State private var explainingFor: String?
 
     var body: some View {
         @Bindable var model = model
@@ -61,8 +62,11 @@ struct MailboxView: View {
         }
         .sheet(isPresented: $showPalette) { CommandPalette(commands: commands) }
         .sheet(isPresented: $showHelp) { ShortcutsHelp() }
+        .sheet(item: $explainingFor) { _ in
+            ExplanationSheet { text in explainingFor = nil; act { await model.rejectNoise($0, explanation: text) } }
+        }
         // Atalhos estilo Gmail (docs/04-ux.md). Teclas únicas valem fora de campos de texto.
-        .onKeyPress(characters: .init(charactersIn: "jkeu#/vrfchszo?O"), phases: .down) { press in
+        .onKeyPress(characters: .init(charactersIn: "jkeu#/vrfchszo?Oyn"), phases: .down) { press in
             if model.compose != nil { return .ignored }
             if model.conversationFocused {
                 switch press.characters {
@@ -111,6 +115,8 @@ struct MailboxView: View {
         case "f": if let id = targetID { model.startCompose(.forward(messageID: id)) }
         case "c": model.startCompose(.new)
         case "z": Task { await model.undo() }
+        case "y": if model.selection == .triage { act { await model.confirmNoise($0) } } else { return .ignored }
+        case "n": if model.selection == .triage, targetID != nil { explainingFor = targetID } else { return .ignored }
         case "?": showHelp = true
         default: return .ignored
         }
@@ -133,6 +139,8 @@ struct MailboxView: View {
         case .snoozed: "Adiadas"
         case .awaitingMe: "Sem resposta sua"
         case .awaitingThem: "Sem resposta deles"
+        case .triage: "Triagem"
+        case .noise: "Ruído"
         case nil: "MasterMail"
         }
     }
@@ -258,6 +266,15 @@ struct FolderList: View {
                     .tag(AppModel.SidebarItem.account(known))
                 }
             }
+            Section("Triagem") {
+                HStack {
+                    Label("Triagem", systemImage: "tray.and.arrow.down")
+                    Spacer()
+                    if model.triageCount > 0 { Text("\(model.triageCount)").font(.caption).foregroundStyle(.secondary) }
+                }
+                .tag(AppModel.SidebarItem.triage)
+                Label("Ruído", systemImage: "speaker.slash").tag(AppModel.SidebarItem.noise)
+            }
             Section("Acompanhamento") {
                 Label("Sem resposta sua", systemImage: "arrowshape.turn.up.left.circle").tag(AppModel.SidebarItem.awaitingMe)
                 Label("Sem resposta deles", systemImage: "clock.arrow.circlepath").tag(AppModel.SidebarItem.awaitingThem)
@@ -288,7 +305,9 @@ struct FolderList: View {
             Button("Cancelar", role: .cancel) { renaming = nil }
         }
         .safeAreaInset(edge: .bottom) {
-            if model.isSyncing {
+            if !model.aiStatus.isEmpty {
+                Text("IA: \(model.aiStatus)").font(.caption2).foregroundStyle(.secondary).lineLimit(2).padding(6).frame(maxWidth: .infinity).background(.bar)
+            } else if model.isSyncing {
                 HStack(spacing: 6) {
                     ProgressView().controlSize(.small)
                     Text(model.syncStatus.isEmpty ? "Indexando" : "Indexando \(model.syncStatus)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
@@ -453,9 +472,43 @@ struct MessageRow: View {
             Text(message.subject.isEmpty ? "(sem assunto)" : message.subject)
                 .lineLimit(1).fontWeight(message.isRead ? .regular : .semibold)
             Text(message.preview).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-            if !message.categories.isEmpty { CategoryChips(categories: message.categories) }
+            HStack(spacing: 4) {
+                if message.importante { Badge("Importante", .red) }
+                if let tipo = message.tipo.flatMap(Tipo.init(rawValue:)), tipo != .pessoa { Badge(tipo.label, .gray) }
+                if !message.categories.isEmpty { CategoryChips(categories: message.categories) }
+            }
+            // Justificativa (CONTEXT.md): a IA explica em uma linha; com a IA desligada a linha não existe.
+            if let why = message.justificativa, !why.isEmpty, (message.importante || Tipo(rawValue: message.tipo ?? "")?.isRuido == true) {
+                Text(why).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+            }
         }
         .padding(.vertical, 2)
+    }
+}
+
+/// `n` na Triagem: por que isso não é ruído? Vira Regra.
+struct ExplanationSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let onSubmit: (String) -> Void
+    @State private var text = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Por que isso não é ruído?").font(.headline)
+            Text("Explique em uma frase. O MasterMail transforma em uma Regra para o remetente ou o domínio e nunca mais pergunta.")
+                .font(.caption).foregroundStyle(.secondary)
+            TextField("ex.: é o aviso de pagamento do cliente, preciso ver", text: $text, axis: .vertical)
+                .lineLimit(2 ... 4).textFieldStyle(.roundedBorder).focused($focused)
+                .onSubmit { onSubmit(text) }
+            HStack {
+                Spacer()
+                Button("Cancelar") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Criar regra") { onSubmit(text) }.keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding().frame(width: 420)
+        .onAppear { focused = true }
     }
 }
 

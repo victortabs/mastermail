@@ -79,6 +79,11 @@ public extension GraphClient {
         try await self.patch("me/messages/\(id)", json: JSONEncoder().encode(patch))
     }
 
+    /// Categorias do Outlook na mensagem (sincronizam para o celular).
+    func setCategories(id: String, _ categories: [String]) async throws {
+        try await patch("me/messages/\(id)", json: JSONEncoder().encode(["categories": categories]))
+    }
+
     func setFlag(id: String, _ flagged: Bool) async throws {
         try await patch("me/messages/\(id)", json: Data(#"{"flag": {"flagStatus": "\#(flagged ? "flagged" : "notFlagged")"}}"#.utf8))
     }

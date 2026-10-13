@@ -64,8 +64,36 @@ extension MailStore {
     /// Caixa de entrada (CONTEXT.md): fora de Pasta local e não Ruído (sem Tipo ainda conta como entrada).
     public func inboxMessages(folder: String, limit: Int = 300, offset: Int = 0) throws -> [StoredMessage] {
         try pool.read { db in
-            try StoredMessage.filter(sql: "folder = ? AND localFolder IS NULL AND (tipo IS NULL OR NOT \(Self.ruidoSQL))", arguments: [folder])
+            try StoredMessage.filter(sql: "folder = ? AND localFolder IS NULL AND (snoozedUntil IS NULL OR snoozedUntil <= ?) AND (tipo IS NULL OR NOT \(Self.ruidoSQL))", arguments: [folder, Date()])
                 .order(Column("receivedAt").desc).limit(limit, offset: offset).fetchAll(db)
+        }
+    }
+
+    /// Todo o Ruído da pasta, confirmado ou não (para nada se perder de vista).
+    public func noise(folder: String, limit: Int = 300, offset: Int = 0) throws -> [StoredMessage] {
+        try pool.read { db in
+            try StoredMessage.filter(sql: "folder = ? AND localFolder IS NULL AND \(Self.ruidoSQL)", arguments: [folder])
+                .order(Column("receivedAt").desc).limit(limit, offset: offset).fetchAll(db)
+        }
+    }
+
+    public func triageCount(folder: String) throws -> Int {
+        try pool.read { db in
+            try Int.fetchOne(db, sql: "SELECT count(*) FROM message WHERE folder = ? AND localFolder IS NULL AND triagemConfirmada = 0 AND \(Self.ruidoSQL)", arguments: [folder]) ?? 0
+        }
+    }
+
+    /// O usuário discordou: vira Pessoa, sai da Triagem e volta à Caixa de entrada.
+    public func markNotNoise(id: String) throws {
+        try pool.write { db in
+            try db.execute(sql: "UPDATE message SET tipo = 'pessoa', triagemConfirmada = 1 WHERE id = ?", arguments: [id])
+        }
+    }
+
+    /// Mensagens recebidas hoje na pasta (contador do Dock).
+    public func receivedToday(folder: String) throws -> Int {
+        try pool.read { db in
+            try Int.fetchOne(db, sql: "SELECT count(*) FROM message WHERE folder = ? AND receivedAt >= ?", arguments: [folder, Calendar.current.startOfDay(for: Date())]) ?? 0
         }
     }
 
