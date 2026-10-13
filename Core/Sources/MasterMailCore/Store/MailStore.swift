@@ -162,6 +162,7 @@ public final class MailStore: Sendable {
             try db.alter(table: "message") { t in t.add(column: "localFolder", .text).indexed() }
             try db.create(table: "local_folder") { t in t.primaryKey("name", .text) }
         }
+        migrator.registerMigration("people-1", migrate: migratePeople)
         return migrator
     }
 
