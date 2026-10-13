@@ -93,6 +93,16 @@ public extension GraphClient {
         return page.value
     }
 
+    /// Busca do servidor (KQL), usada enquanto o Índice local ainda não cobre tudo.
+    func searchServer(_ text: String, top: Int = 50) async throws -> [Message] {
+        let page: GraphPage<Message> = try await get("me/messages", query: [
+            .init(name: "$search", value: "\"\(text.replacingOccurrences(of: "\"", with: ""))\""),
+            .init(name: "$top", value: String(top)),
+            .init(name: "$select", value: Message.listFields),
+        ])
+        return page.value
+    }
+
     func markRead(id: String, _ isRead: Bool = true) async throws {
         try await patch("me/messages/\(id)", json: Data(#"{"isRead": \#(isRead)}"#.utf8))
     }

@@ -12,7 +12,7 @@
 | Login com uma conta Microsoft 365 (trabalho), OAuth próprio sem MSAL | Must | ADR 0003 (Graph) + ADR 0007 (login). **✅** |
 | Consentimento fácil para outros usuários: detectar bloqueio do admin, oferecer URL de consentimento e texto para o TI | Must | Escopos pedidos aos poucos. **✅** |
 | Sincronização por polling (30–60 s) com o app aberto | Must | Sem servidor próprio. **✅** |
-| Painel de saúde da sincronização; falha de envio ruidosa; caixa de saída visível | Must | Dor nº 2 da pesquisa. **🟡 rodapé mostra indexação; falta falha de envio ruidosa e caixa de saída** |
+| Painel de saúde da sincronização; falha de envio ruidosa; caixa de saída visível | Must | Dor nº 2 da pesquisa. **✅** rodapé de indexação, Caixa de saída com tentar de novo, alerta e atenção no Dock |
 | Fila offline: ação local imediata, servidor depois | Must | **⬜** |
 | Múltiplas contas / caixa unificada | Won't | Decisão explícita; v2. |
 | Caixa compartilhada, calendário delegado | Won't | Usuário não usa. |
@@ -34,8 +34,8 @@
 | Envio programado (servidor segura; fica em Rascunhos, editável) | Must | Via propriedade de envio adiado do Graph. **✅** |
 | Rascunhos sincronizados no servidor | Must | **✅** |
 | Cancelar inscrição em um clique | Must | List-Unsubscribe. **✅** |
-| Imagens remotas bloqueadas por padrão; liberar por remetente/Organização | Must | **🟡 por mensagem; por remetente/Organização: ⬜** |
-| Alerta de phishing barato: domínio ≠ nome exibido, link texto ≠ destino | Should | Sem modelo. **⬜** |
+| Imagens remotas bloqueadas por padrão; liberar por remetente/Organização | Must | **✅** por mensagem, por remetente ou por domínio |
+| Alerta de phishing barato: domínio ≠ nome exibido, link texto ≠ destino | Should | Sem modelo. **✅** |
 | Limpeza de parâmetros de rastreio em links | Could | **⬜** |
 
 ## Composição
@@ -60,7 +60,7 @@
 |---|---|---|
 | Índice local de **todas** as mensagens: metadados + texto puro + nomes de anexos. Sem resumo. | Must | ~1 GB por 100 mil mensagens. **🟡 falta nome dos anexos** |
 | HTML completo e anexos só dos últimos 12 meses; o resto sob demanda | Must | **✅** |
-| Busca do Graph enquanto indexa, com progresso visível | Must | **⬜** |
+| Busca do Graph enquanto indexa, com progresso visível | Must | **✅** |
 | Operadores `from:`, `to:`, `has:attachment`, `before:`, `org:` | Must | **✅** |
 | Resultado determinístico, termos destacados, agrupar por remetente/Organização | Must | **🟡 sem destaque de termos nem agrupar** |
 | Texto dentro de anexos (PDF, Word, Excel) | Won't | Dobra o índice. |

@@ -26,6 +26,15 @@ final class AppModel {
         case awaitingThem
         case triage
         case noise
+        case outbox
+    }
+
+    /// Envio que falhou: fica visível até ser reenviado ou descartado (requisito: falha de envio ruidosa).
+    struct FailedSend: Identifiable {
+        let id = UUID()
+        let subject: String
+        let error: String
+        let compose: ComposeModel
     }
 
     /// Uma ação que pode ser desfeita com `z`.
@@ -82,6 +91,9 @@ final class AppModel {
     let assistant = AssistantModel()
     var showAssistant = false
     private let mac = MacCalendar()
+    private(set) var failedSends: [FailedSend] = []
+    /// Remetentes (endereço ou domínio) cujas imagens remotas o usuário liberou de vez.
+    var trustedImageSenders: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "trustedImageSenders") ?? [])
     private(set) var aiStatus = ""
     private var notified: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "notifiedIDs") ?? [])
     private var sync: MailSync?
@@ -408,6 +420,7 @@ final class AppModel {
         case .account: try selectedFolderID.map { try store.messages(in: $0, limit: Self.pageSize, offset: offset) } ?? []
         case .triage: try wellKnown[.inbox].map { try store.triage(folder: $0, limit: Self.pageSize, offset: offset) } ?? []
         case .noise: try wellKnown[.inbox].map { try store.noise(folder: $0, limit: Self.pageSize, offset: offset) } ?? []
+        case .outbox: []
         case .snoozed: offset == 0 ? try store.snoozed() : []
         case .awaitingMe: offset == 0 ? try store.awaitingMyReply(inbox: wellKnown[.inbox] ?? "", me: accountEmail) : []
         case .awaitingThem: offset == 0 ? try store.awaitingTheirReply(sent: wellKnown[.sentitems] ?? "", me: accountEmail) : []
@@ -422,7 +435,16 @@ final class AppModel {
                 messages = page
                 hasMore = page.count == Self.pageSize
             } else {
-                messages = try store.search(SearchQuery.parse(searchText))
+                let q = SearchQuery.parse(searchText)
+                var results = try store.search(q)
+                // Enquanto a Caixa de entrada não está toda indexada, completa com a busca do servidor (sem duplicar).
+                if let inbox = wellKnown[.inbox], !(try store.isFullyIndexed(folder: inbox)), !q.text.isEmpty, let graph {
+                    let seen = Set(results.map(\.id))
+                    if let remote = try? await graph.searchServer(q.text) {
+                        results += remote.filter { !seen.contains($0.id) }.map { StoredMessage(message: $0, folder: inbox) }
+                    }
+                }
+                messages = results
                 hasMore = false
             }
         } catch {
@@ -524,7 +546,13 @@ final class AppModel {
             await model.send()
             await MainActor.run {
                 guard let self else { return }
-                if let error = model.error { self.errorMessage = error } else { self.showToast("Enviada") }
+                if let error = model.error {
+                    self.failedSends.append(FailedSend(subject: model.subject, error: error, compose: model))
+                    self.errorMessage = "Falha ao enviar \"\(model.subject)\": \(error)\nA mensagem está na Caixa de saída para tentar de novo."
+                    NSApplication.shared.requestUserAttention(.criticalRequest)
+                } else {
+                    self.showToast("Enviada")
+                }
                 self.pendingSend = nil
             }
         }
@@ -568,6 +596,33 @@ final class AppModel {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    func retrySend(_ failed: FailedSend) async {
+        failedSends.removeAll { $0.id == failed.id }
+        await failed.compose.send()
+        if let error = failed.compose.error {
+            failedSends.append(FailedSend(subject: failed.subject, error: error, compose: failed.compose))
+            errorMessage = error
+        } else {
+            showToast("Enviada")
+        }
+    }
+
+    func discardFailed(_ failed: FailedSend) {
+        failedSends.removeAll { $0.id == failed.id }
+        showToast("Mantida em Rascunhos")
+    }
+
+    func trustImages(from m: StoredMessage, wholeDomain: Bool) {
+        let key = wholeDomain ? (m.fromAddress.split(separator: "@").last.map(String.init) ?? m.fromAddress) : m.fromAddress
+        trustedImageSenders.insert(key.lowercased())
+        UserDefaults.standard.set(Array(trustedImageSenders), forKey: "trustedImageSenders")
+    }
+
+    func imagesAllowed(_ m: StoredMessage) -> Bool {
+        let domain = m.fromAddress.split(separator: "@").last.map(String.init)?.lowercased() ?? ""
+        return remoteImagesAllowed.contains(m.id) || trustedImageSenders.contains(m.fromAddress.lowercased()) || trustedImageSenders.contains(domain)
     }
 
     // MARK: Ações (local primeiro, servidor depois, todas com desfazer)

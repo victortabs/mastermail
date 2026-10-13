@@ -120,3 +120,12 @@ struct QuoteAndFollowUpTests {
         #expect(try store.messages(in: "inbox").map(\.id) == ["b2", "c1"])
     }
 }
+
+struct PhishingTests {
+    @Test func detectsMismatchedNameAndLink() {
+        let signals = HTMLText.phishingSignals(fromName: "Banco Itau <seguranca@itau.com.br>", fromAddress: "x@golpe.ru",
+                                               html: #"<a href="https://golpe.ru/login">https://www.itau.com.br/acesso</a>"#)
+        #expect(signals.count == 2)
+        #expect(HTMLText.phishingSignals(fromName: "Marina", fromAddress: "m@bdil.com.br", html: #"<a href="https://bdil.com.br/x">https://bdil.com.br/x</a>"#).isEmpty)
+    }
+}

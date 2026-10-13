@@ -293,6 +293,13 @@ public final class MailStore: Sendable {
         }
     }
 
+    /// true quando a primeira indexação da pasta terminou (o link guardado é um deltaLink, não um nextLink).
+    public func isFullyIndexed(folder: String) throws -> Bool {
+        try pool.read { db in
+            try SyncState.fetchOne(db, key: folder)?.deltaLink.contains("deltatoken") ?? false
+        }
+    }
+
     public func hasSynced(folder: String) throws -> Bool {
         try pool.read { db in try SyncState.fetchOne(db, key: folder) != nil }
     }

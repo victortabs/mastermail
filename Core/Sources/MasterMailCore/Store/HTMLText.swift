@@ -49,6 +49,32 @@ public enum HTMLText {
         return head + "<details class=\"mm-quote\"><summary>··· citação</summary>" + tail + "</details>"
     }
 
+    /// Sinais baratos de golpe (requisito Should): nome exibido com domínio diferente do endereço, link cujo texto é
+    /// uma URL de outro domínio. Sem modelo.
+    public static func phishingSignals(fromName: String, fromAddress: String, html: String?) -> [String] {
+        var signals: [String] = []
+        let addressDomain = fromAddress.split(separator: "@").last.map(String.init)?.lowercased() ?? ""
+        if let m = fromName.firstMatch(of: /[\w.+-]+@([\w-]+\.[\w.-]+)/) {
+            let nameDomain = String(m.output.1).lowercased()
+            if !addressDomain.isEmpty, nameDomain != addressDomain { signals.append("O nome exibido mostra @\(nameDomain), mas o remetente real é @\(addressDomain).") }
+        }
+        if let html {
+            for m in html.matches(of: /<a[^>]*href="(https?:\/\/[^"\/]+)[^"]*"[^>]*>\s*(https?:\/\/[^<\s]+)/) {
+                let hrefHost = host(String(m.output.1))
+                let textHost = host(String(m.output.2))
+                if !hrefHost.isEmpty, !textHost.isEmpty, hrefHost != textHost, !hrefHost.hasSuffix("." + textHost), !textHost.hasSuffix("." + hrefHost) {
+                    signals.append("Um link mostra \(textHost) mas leva para \(hrefHost).")
+                    break
+                }
+            }
+        }
+        return signals
+    }
+
+    private static func host(_ url: String) -> String {
+        (URL(string: url)?.host ?? "").lowercased().replacingOccurrences(of: "www.", with: "")
+    }
+
     private static let named: [String: String] = [
         "amp": "&", "lt": "<", "gt": ">", "quot": "\"", "apos": "'", "nbsp": "\u{00A0}",
         "ccedil": "ç", "Ccedil": "Ç", "atilde": "ã", "Atilde": "Ã", "otilde": "õ", "Otilde": "Õ",

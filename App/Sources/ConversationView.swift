@@ -99,9 +99,22 @@ struct MessageCard: View {
                 if m.hasAttachments {
                     AttachmentStrip(messageID: m.id, attachments: $attachments)
                 }
-                let allowRemote = model.remoteImagesAllowed.contains(m.id)
+                let signals = HTMLText.phishingSignals(fromName: m.fromName, fromAddress: m.fromAddress, html: m.bodyHTML)
+                if !signals.isEmpty {
+                    Label(signals.joined(separator: " "), systemImage: "exclamationmark.shield.fill")
+                        .font(.caption).foregroundStyle(.red).padding(6)
+                        .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+                }
+                let allowRemote = model.imagesAllowed(m)
                 if let html = m.bodyHTML, !allowRemote, html.contains("http") {
-                    Button("Mostrar imagens remotas") { model.remoteImagesAllowed.insert(m.id) }.controlSize(.small)
+                    HStack(spacing: 6) {
+                        Button("Mostrar imagens") { model.remoteImagesAllowed.insert(m.id) }
+                        Menu("Sempre de…") {
+                            Button(m.fromAddress) { model.trustImages(from: m, wholeDomain: false) }
+                            Button("@" + (m.fromAddress.split(separator: "@").last.map(String.init) ?? "")) { model.trustImages(from: m, wholeDomain: true) }
+                        }.fixedSize()
+                    }
+                    .controlSize(.small)
                 }
                 MessageBodyView(html: m.bodyHTML, text: m.bodyText, allowRemote: allowRemote, height: $bodyHeight)
                     .frame(height: bodyHeight)

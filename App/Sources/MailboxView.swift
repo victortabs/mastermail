@@ -18,8 +18,12 @@ struct MailboxView: View {
             FolderList()
                 .navigationSplitViewColumnWidth(min: 160, ideal: 200)
         } content: {
-            MessageList(selection: $selection)
-                .navigationSplitViewColumnWidth(min: 300, ideal: 380)
+            if model.selection == .outbox {
+                OutboxList().navigationSplitViewColumnWidth(min: 300, ideal: 380)
+            } else {
+                MessageList(selection: $selection)
+                    .navigationSplitViewColumnWidth(min: 300, ideal: 380)
+            }
         } detail: {
             if model.openMessage != nil {
                 ConversationView()
@@ -143,6 +147,7 @@ struct MailboxView: View {
         case .awaitingThem: "Sem resposta deles"
         case .triage: "Triagem"
         case .noise: "Ruído"
+        case .outbox: "Caixa de saída"
         case nil: "MasterMail"
         }
     }
@@ -279,6 +284,16 @@ struct FolderList: View {
                 .tag(AppModel.SidebarItem.triage)
                 Label("Ruído", systemImage: "speaker.slash").tag(AppModel.SidebarItem.noise)
             }
+            if !model.failedSends.isEmpty {
+                Section {
+                    HStack {
+                        Label("Caixa de saída", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red)
+                        Spacer()
+                        Text("\(model.failedSends.count)").font(.caption).foregroundStyle(.red)
+                    }
+                    .tag(AppModel.SidebarItem.outbox)
+                }
+            }
             Section("Acompanhamento") {
                 Label("Sem resposta sua", systemImage: "arrowshape.turn.up.left.circle").tag(AppModel.SidebarItem.awaitingMe)
                 Label("Sem resposta deles", systemImage: "clock.arrow.circlepath").tag(AppModel.SidebarItem.awaitingThem)
@@ -391,6 +406,27 @@ struct SnoozePicker: View {
             }
         }
         .padding().frame(width: 320)
+    }
+}
+
+/// Envios que falharam: tentar de novo ou manter em Rascunhos. Nunca some em silêncio.
+struct OutboxList: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        List(model.failedSends) { f in
+            VStack(alignment: .leading, spacing: 4) {
+                Text(f.subject.isEmpty ? "(sem assunto)" : f.subject).fontWeight(.semibold)
+                Text(f.error).font(.caption).foregroundStyle(.red).lineLimit(3)
+                HStack {
+                    Button("Tentar de novo") { Task { await model.retrySend(f) } }
+                    Button("Manter em Rascunhos") { model.discardFailed(f) }
+                }
+                .controlSize(.small)
+            }
+            .padding(.vertical, 4)
+        }
+        .overlay { if model.failedSends.isEmpty { ContentUnavailableView("Nada pendente", systemImage: "checkmark.circle") } }
     }
 }
 
