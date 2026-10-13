@@ -55,6 +55,11 @@ public struct Recipient: Codable, Sendable, Hashable {
 public struct ItemBody: Codable, Sendable, Hashable {
     public var contentType: String
     public var content: String
+
+    public init(contentType: String, content: String) {
+        self.contentType = contentType
+        self.content = content
+    }
 }
 
 /// Uma Mensagem (ver CONTEXT.md): um e-mail individual, recebido ou enviado.

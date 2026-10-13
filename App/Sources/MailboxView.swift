@@ -28,6 +28,17 @@ struct MailboxView: View {
         .navigationTitle(model.searchText.isEmpty ? title : "Busca")
         .navigationSubtitle(account)
         .toolbar {
+            ToolbarItemGroup {
+                Button { model.startCompose(.new) } label: { Label("Nova mensagem", systemImage: "square.and.pencil") }
+                    .keyboardShortcut("n", modifiers: .command)
+                Button { if let id = targetID { model.startCompose(.reply(messageID: id, all: true)) } } label: { Label("Responder", systemImage: "arrowshape.turn.up.left.2") }
+                    .disabled(targetID == nil)
+                Button { if let id = targetID { model.startCompose(.reply(messageID: id, all: false)) } } label: { Label("Responder ao remetente", systemImage: "arrowshape.turn.up.left") }
+                    .keyboardShortcut("r", modifiers: .command)
+                    .disabled(targetID == nil)
+                Button { if let id = targetID { model.startCompose(.forward(messageID: id)) } } label: { Label("Encaminhar", systemImage: "arrowshape.turn.up.right") }
+                    .disabled(targetID == nil)
+            }
             ToolbarItem {
                 Button { Task { await model.refresh() } } label: { Label("Atualizar", systemImage: "arrow.clockwise") }
                     .keyboardShortcut("r", modifiers: [.command, .shift])
@@ -47,7 +58,10 @@ struct MailboxView: View {
                 act { await model.moveToLocalFolder($0, name) }
             }
         }
-        .onKeyPress(characters: .init(charactersIn: "jkeu#/v")) { press in
+        .sheet(item: Binding(get: { model.compose }, set: { if $0 == nil { model.compose = nil } })) { compose in
+            ComposeView(model: compose) { model.compose = nil }
+        }
+        .onKeyPress(characters: .init(charactersIn: "jkeu#/vrfc")) { press in
             switch press.characters {
             case "j": moveSelection(by: 1)
             case "k": moveSelection(by: -1)
@@ -59,11 +73,17 @@ struct MailboxView: View {
             }
             case "/": searchFocused = true
             case "v": if selection != nil { pickingFolderFor = selection }
+            case "r": if let id = targetID { model.startCompose(.reply(messageID: id, all: true)) }
+            case "f": if let id = targetID { model.startCompose(.forward(messageID: id)) }
+            case "c": model.startCompose(.new)
             default: return .ignored
             }
             return .handled
         }
     }
+
+    /// Mensagem alvo das ações: a aberta, senão a selecionada.
+    private var targetID: String? { model.openMessage?.id ?? selection }
 
     private var title: String {
         switch model.selection {

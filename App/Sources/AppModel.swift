@@ -44,6 +44,9 @@ final class AppModel {
     var errorMessage: String?
 
     private var graph: GraphClient?
+    var client: GraphClient? { graph }
+    /// Composição aberta (sheet), se houver.
+    var compose: ComposeModel?
     private var sync: MailSync?
     private let tokenStore = TokenStore.default()
     private let store: MailStore
@@ -337,6 +340,15 @@ final class AppModel {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    // MARK: Composição
+
+    func startCompose(_ mode: ComposeModel.Mode) {
+        guard let graph else { return }
+        let model = ComposeModel(mode: mode, graph: graph)
+        compose = model
+        Task { await model.start() }
     }
 
     // MARK: Ações (local primeiro, servidor depois)
