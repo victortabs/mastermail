@@ -11,13 +11,16 @@ public struct OAuthConfig: Sendable {
         clientID: String,
         redirectURI: String,
         tenant: String = "common",
-        scopes: [String] = ["offline_access", "User.Read", "Mail.ReadWrite", "Mail.Send"]
+        scopes: [String] = OAuthConfig.defaultScopes
     ) {
         self.clientID = clientID
         self.redirectURI = redirectURI
         self.tenant = tenant
         self.scopes = scopes
     }
+
+    /// Escopos da v1. Mudar esta lista obriga um novo login (o token guardado registra os escopos com que nasceu).
+    public static let defaultScopes = ["offline_access", "User.Read", "Mail.ReadWrite", "Mail.Send", "Calendars.ReadWrite", "Contacts.Read"]
 
     var authorizeURL: URL { URL(string: "https://login.microsoftonline.com/\(tenant)/oauth2/v2.0/authorize")! }
     var tokenURL: URL { URL(string: "https://login.microsoftonline.com/\(tenant)/oauth2/v2.0/token")! }
@@ -27,11 +30,14 @@ public struct Tokens: Codable, Sendable, Equatable {
     public var accessToken: String
     public var refreshToken: String
     public var expiresAt: Date
+    /// Escopos pedidos no login que gerou estes tokens.
+    public var scopes: [String]?
 
-    public init(accessToken: String, refreshToken: String, expiresAt: Date) {
+    public init(accessToken: String, refreshToken: String, expiresAt: Date, scopes: [String]? = nil) {
         self.accessToken = accessToken
         self.refreshToken = refreshToken
         self.expiresAt = expiresAt
+        self.scopes = scopes
     }
 
     /// Margem de 60 s para não usar um token que expira durante a requisição.
@@ -133,7 +139,8 @@ public enum OAuth {
         return Tokens(
             accessToken: token.access_token,
             refreshToken: token.refresh_token ?? "",
-            expiresAt: Date().addingTimeInterval(TimeInterval(token.expires_in))
+            expiresAt: Date().addingTimeInterval(TimeInterval(token.expires_in)),
+            scopes: config.scopes
         )
     }
 

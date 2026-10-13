@@ -35,7 +35,11 @@
 	<string>26.0</string>
 	<key>MasterMailClientID</key>
 	<string>$(MASTERMAIL_CLIENT_ID)</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Mostrar os calendários do Mac (iCloud etc.) ao lado da agenda Microsoft. O MasterMail não altera esses calendários.</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>GPL-3.0-or-later</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>Criar lembretes a partir de e-mails.</string>
 </dict>
 </plist>

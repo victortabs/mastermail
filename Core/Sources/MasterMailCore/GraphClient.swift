@@ -26,6 +26,11 @@ public actor GraphClient {
         self.store = store
         self.session = session
         tokens = store.load()
+        // Token de um login com escopos antigos: tratar como deslogado para pedir consentimento dos novos.
+        if let t = tokens, Set(t.scopes ?? []) != Set(config.scopes) {
+            tokens = nil
+            store.clear()
+        }
     }
 
     public var isSignedIn: Bool { tokens != nil }

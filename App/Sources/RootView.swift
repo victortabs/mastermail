@@ -10,7 +10,12 @@ struct RootView: View {
             switch model.phase {
             case .needsClientID: ClientIDView()
             case .signedOut: SignInView()
-            case let .signedIn(account): MailboxView(account: account)
+            case let .signedIn(account):
+                switch model.view {
+                case .mail: MailboxView(account: account)
+                case .calendar: CalendarView()
+                case .people: ContentUnavailableView("Pessoas", systemImage: "person.2", description: Text("Organizações e Contatos: em construção."))
+                }
             }
         }
         .alert("Erro", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {

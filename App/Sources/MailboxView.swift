@@ -28,6 +28,7 @@ struct MailboxView: View {
         .navigationTitle(model.searchText.isEmpty ? title : "Busca")
         .navigationSubtitle(account)
         .toolbar {
+            ToolbarItem(placement: .navigation) { ViewPicker() }
             ToolbarItemGroup {
                 Button { model.startCompose(.new) } label: { Label("Nova mensagem", systemImage: "square.and.pencil") }
                     .keyboardShortcut("n", modifiers: .command)
@@ -232,6 +233,46 @@ struct LocalFolderPicker: View {
     }
 }
 
+/// Mail / Calendário / Pessoas (⌘1 ⌘2 ⌘3).
+struct ViewPicker: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        @Bindable var model = model
+        Picker("Visão", selection: $model.view) {
+            Image(systemName: "envelope").tag(AppModel.AppView.mail)
+            Image(systemName: "calendar").tag(AppModel.AppView.calendar)
+            Image(systemName: "person.2").tag(AppModel.AppView.people)
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+    }
+}
+
+/// Próximos eventos de hoje, no topo da Lista (UX: não trocar de visão para ver a agenda).
+struct TodayStrip: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        if let events = model.calendar?.upcomingToday, !events.isEmpty {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(events.prefix(3)) { e in
+                    HStack(spacing: 6) {
+                        Text(e.isAllDay ? "dia todo" : e.start.formatted(date: .omitted, time: .shortened))
+                            .font(.caption.monospacedDigit()).foregroundStyle(.secondary).frame(width: 52, alignment: .leading)
+                        Text(e.title).font(.caption).lineLimit(1)
+                        if !e.isEditable { Image(systemName: "lock").font(.caption2).foregroundStyle(.tertiary) }
+                    }
+                }
+            }
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.bar)
+            .onTapGesture { model.view = .calendar }
+        }
+    }
+}
+
 struct MessageList: View {
     @Environment(AppModel.self) private var model
     @Binding var selection: StoredMessage.ID?
@@ -254,6 +295,7 @@ struct MessageList: View {
                     Button("Apagar", role: .destructive) { Task { await model.move(message.id, to: .deleteditems) } }
                 }
         }
+        .safeAreaInset(edge: .top, spacing: 0) { TodayStrip() }
         .overlay {
             if model.messages.isEmpty {
                 if !model.searchText.isEmpty {

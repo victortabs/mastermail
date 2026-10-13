@@ -38,6 +38,8 @@ targets:
         NSHumanReadableCopyright: "GPL-3.0-or-later"
         # Client ID público do Entra (ADR 0007). Forks registram o próprio e trocam em App/Config.xcconfig.
         MasterMailClientID: $(MASTERMAIL_CLIENT_ID)
+        NSCalendarsFullAccessUsageDescription: "Mostrar os calendários do Mac (iCloud etc.) ao lado da agenda Microsoft. O MasterMail não altera esses calendários."
+        NSRemindersFullAccessUsageDescription: "Criar lembretes a partir de e-mails."
         CFBundleURLTypes:
           - CFBundleURLName: io.github.victortabs.mastermail.auth
             CFBundleURLSchemes:

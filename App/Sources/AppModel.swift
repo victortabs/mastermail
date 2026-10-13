@@ -13,7 +13,11 @@ final class AppModel {
         case signedIn(account: String)
     }
 
+    enum AppView: Hashable { case mail, calendar, people }
+
     private(set) var phase: Phase = .needsClientID
+    var view: AppView = .mail
+    private(set) var calendar: CalendarModel?
     /// O que está selecionado na lateral: uma pasta da conta ou uma Pasta local.
     enum SidebarItem: Hashable {
         case account(WellKnownFolder)
@@ -86,6 +90,7 @@ final class AppModel {
         let client = GraphClient(config: config, store: tokenStore)
         graph = client
         sync = MailSync(graph: client, store: store)
+        calendar = CalendarModel(graph: client)
         phase = .signedOut
         Task {
             if await client.isSignedIn { await loadAccount() }
@@ -134,6 +139,7 @@ final class AppModel {
             await folderChanged()
             startPolling()
             Task { await reconcileLocalFolders() }
+            Task { await calendar?.load() }
             startBackfill()
         } catch {
             errorMessage = error.localizedDescription
