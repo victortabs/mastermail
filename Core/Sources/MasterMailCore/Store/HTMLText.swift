@@ -16,6 +16,18 @@ public enum HTMLText {
         return s.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Substitui `cid:xxx` pelos bytes do anexo inline, para assinaturas e imagens coladas aparecerem.
+    public static func embedInline(_ html: String, attachments: [Attachment]) -> String {
+        var out = html
+        for a in attachments {
+            guard let cid = a.contentId?.trimmingCharacters(in: CharacterSet(charactersIn: "<>")), !cid.isEmpty,
+                  let bytes = a.contentBytes else { continue }
+            let dataURL = "data:\(a.contentType ?? "image/png");base64,\(bytes)"
+            out = out.replacingOccurrences(of: "cid:\(cid)", with: dataURL)
+        }
+        return out
+    }
+
     private static let named: [String: String] = [
         "amp": "&", "lt": "<", "gt": ">", "quot": "\"", "apos": "'", "nbsp": "\u{00A0}",
         "ccedil": "ç", "Ccedil": "Ç", "atilde": "ã", "Atilde": "Ã", "otilde": "õ", "Otilde": "Õ",

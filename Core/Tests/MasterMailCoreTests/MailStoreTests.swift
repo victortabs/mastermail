@@ -53,3 +53,13 @@ struct MailStoreTests {
         #expect(page.deltaLink != nil && page.nextLink == nil)
     }
 }
+
+struct InlineImageTests {
+    @Test func cidBecomesDataURL() {
+        let html = #"<p>Assinatura</p><img src="cid:logo@empresa">"#
+        let out = HTMLText.embedInline(html, attachments: [
+            Attachment(id: "1", name: "logo.png", contentType: "image/png", contentId: "<logo@empresa>", isInline: true, contentBytes: "AAAA"),
+        ])
+        #expect(out == #"<p>Assinatura</p><img src="data:image/png;base64,AAAA">"#)
+    }
+}

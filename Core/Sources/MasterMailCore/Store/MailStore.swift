@@ -17,6 +17,8 @@ public struct StoredMessage: Codable, Sendable, Hashable, Identifiable, Fetchabl
     public var isRead: Bool
     public var hasAttachments: Bool
     public var preview: String
+    /// Categorias do Outlook (ver CONTEXT.md: Categoria). GRDB guarda como JSON.
+    public var categories: [String]
     public var bodyText: String
     /// HTML só dos últimos 12 meses (requisito); mais antigo fica nil e é baixado ao abrir.
     public var bodyHTML: String?
@@ -40,6 +42,7 @@ public struct StoredMessage: Codable, Sendable, Hashable, Identifiable, Fetchabl
         isRead = m.isRead
         hasAttachments = m.hasAttachments
         preview = m.bodyPreview ?? ""
+        categories = m.categories ?? []
         if let body = m.body {
             if body.contentType.lowercased() == "html" {
                 bodyHTML = m.receivedDateTime.timeIntervalSinceNow > -Self.htmlRetention ? body.content : nil
@@ -116,19 +119,59 @@ public final class MailStore: Sendable {
                 t.column("deltaLink", .text).notNull()
             }
         }
+        // v2: categorias + pasta passa a ser o id real do servidor. Recomeça o índice (ainda não há usuários).
+        migrator.registerMigration("v2") { db in
+            try db.drop(table: "message_ft")
+            try db.drop(table: "message")
+            try db.drop(table: "sync_state")
+            try db.create(table: "message") { t in
+                t.primaryKey("id", .text)
+                t.column("folder", .text).notNull().indexed()
+                t.column("conversationId", .text).indexed()
+                t.column("conversationIndex", .text)
+                t.column("subject", .text).notNull()
+                t.column("fromName", .text).notNull()
+                t.column("fromAddress", .text).notNull().indexed()
+                t.column("recipients", .text).notNull()
+                t.column("receivedAt", .datetime).notNull().indexed()
+                t.column("isRead", .boolean).notNull()
+                t.column("hasAttachments", .boolean).notNull()
+                t.column("preview", .text).notNull()
+                t.column("categories", .text).notNull().defaults(to: "[]")
+                t.column("bodyText", .text).notNull()
+                t.column("bodyHTML", .text)
+            }
+            try db.create(virtualTable: "message_ft", using: FTS5()) { t in
+                t.synchronize(withTable: "message")
+                t.tokenizer = .unicode61(diacritics: .remove)
+                t.column("subject")
+                t.column("fromName")
+                t.column("fromAddress")
+                t.column("recipients")
+                t.column("bodyText")
+            }
+            try db.create(table: "sync_state") { t in
+                t.primaryKey("folder", .text)
+                t.column("deltaLink", .text).notNull()
+            }
+        }
         return migrator
     }
 
     // MARK: Leitura
 
-    public func messages(in folder: String, limit: Int = 200) throws -> [StoredMessage] {
+    public func messages(in folder: String, limit: Int = 300, offset: Int = 0) throws -> [StoredMessage] {
         try pool.read { db in
             try StoredMessage
                 .filter(Column("folder") == folder)
                 .order(Column("receivedAt").desc)
-                .limit(limit)
+                .limit(limit, offset: offset)
                 .fetchAll(db)
         }
+    }
+
+    public func hasSynced(folder: String) throws -> Bool {
+        try pool.read { db in try SyncState.fetchOne(db, key: folder) != nil }
     }
 
     public func message(id: String) throws -> StoredMessage? {

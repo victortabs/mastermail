@@ -59,6 +59,7 @@ struct MessageCard: View {
                         }
                         Text(m.receivedAt, format: .dateTime.day().month().hour().minute()).font(.caption).foregroundStyle(.secondary)
                     }
+                    if !m.categories.isEmpty { CategoryChips(categories: m.categories) }
                     if let parent {
                         Label("em resposta a \(parent.message.fromName.isEmpty ? parent.message.fromAddress : parent.message.fromName), \(parent.message.receivedAt, format: .dateTime.day().month().hour().minute())", systemImage: "arrow.turn.down.right")
                             .font(.caption).foregroundStyle(.secondary)
@@ -74,8 +75,14 @@ struct MessageCard: View {
                 if !m.recipients.isEmpty {
                     Text("Para: " + m.recipients).font(.caption).foregroundStyle(.secondary).lineLimit(3)
                 }
-                MessageBodyView(html: m.bodyHTML, text: m.bodyText, height: $bodyHeight)
+                let allowRemote = model.remoteImagesAllowed.contains(m.id)
+                if let html = m.bodyHTML, !allowRemote, html.contains("http") {
+                    Button("Mostrar imagens remotas") { model.remoteImagesAllowed.insert(m.id) }
+                        .controlSize(.small)
+                }
+                MessageBodyView(html: m.bodyHTML, text: m.bodyText, allowRemote: allowRemote, height: $bodyHeight)
                     .frame(height: bodyHeight)
+                    .id(allowRemote)
             }
         }
         .padding(12)

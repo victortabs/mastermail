@@ -6,17 +6,19 @@ import WebKit
 struct MessageBodyView: NSViewRepresentable {
     let html: String?
     let text: String
+    /// Usuário pediu para carregar imagens remotas desta mensagem.
+    var allowRemote = false
     /// Altura do conteúdo, medida depois de carregar, para a mensagem caber num ScrollView.
     @Binding var height: CGFloat
 
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
         config.defaultWebpagePreferences.allowsContentJavaScript = false
-        let web = WKWebView(frame: .zero, configuration: config)
+        let web = PassthroughWebView(frame: .zero, configuration: config)
         web.navigationDelegate = context.coordinator
         context.coordinator.onHeight = { h in Task { @MainActor in height = max(40, h) } }
         web.setValue(false, forKey: "drawsBackground")
-        Task { await Self.applyBlockList(to: config.userContentController) }
+        if !allowRemote { Task { await Self.applyBlockList(to: config.userContentController) } }
         return web
     }
 
@@ -65,6 +67,13 @@ struct MessageBodyView: NSViewRepresentable {
         if let list = try? await WKContentRuleListStore.default().compileContentRuleList(forIdentifier: "block-remote", encodedContentRuleList: blockList) {
             controller.add(list)
         }
+    }
+}
+
+/// A mensagem cabe inteira (altura medida), então a roda do mouse vai para o ScrollView de fora.
+final class PassthroughWebView: WKWebView {
+    override func scrollWheel(with event: NSEvent) {
+        nextResponder?.scrollWheel(with: event)
     }
 }
 

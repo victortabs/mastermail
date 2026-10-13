@@ -3,7 +3,7 @@ import Foundation
 import MasterMailCore
 import Observation
 
-/// Estado do app: conta, Caixa de Entrada (do Índice local) e mensagem aberta. Um só, na main thread.
+/// Estado do app: conta, pastas, lista (do Índice local) e Conversa aberta. Um só, na main thread.
 @MainActor
 @Observable
 final class AppModel {
@@ -14,14 +14,19 @@ final class AppModel {
     }
 
     private(set) var phase: Phase = .needsClientID
+    private(set) var folders: [MailFolder] = []
+    private(set) var wellKnown: [WellKnownFolder: String] = [:]
+    var selectedFolderID: String? { didSet { if selectedFolderID != oldValue { Task { await folderChanged() } } } }
     private(set) var messages: [StoredMessage] = []
+    private(set) var hasMore = false
     private(set) var openMessage: StoredMessage?
     /// A Conversa da mensagem aberta, cronológica, com Ramos.
     private(set) var conversation: [ConversationNode] = []
     var expanded: Set<String> = []
+    /// Mensagens em que o usuário liberou imagens remotas (só nesta sessão).
+    var remoteImagesAllowed: Set<String> = []
     private(set) var isSyncing = false
-    /// Quantidade de mensagens processadas na sincronização em curso (primeira indexação é longa).
-    private(set) var syncProgress = 0
+    private(set) var syncStatus = ""
     var searchText = "" { didSet { if searchText != oldValue { Task { await reloadList() } } } }
     var errorMessage: String?
 
@@ -30,10 +35,11 @@ final class AppModel {
     private let tokenStore = TokenStore.default()
     private let store: MailStore
     private var pollTask: Task<Void, Never>?
+    private var backfillTask: Task<Void, Never>?
+    private static let pageSize = 300
 
     static let redirectScheme = "msauth.\(Bundle.main.bundleIdentifier ?? "io.github.victortabs.mastermail")"
     static let clientIDDefaultsKey = "MasterMailClientID"
-    static let folder = "inbox"
 
     init() {
         do {
@@ -93,9 +99,12 @@ final class AppModel {
 
     func signOut() async {
         pollTask?.cancel()
+        backfillTask?.cancel()
         await graph?.signOut()
         messages = []
+        folders = []
         openMessage = nil
+        conversation = []
         phase = .signedOut
     }
 
@@ -104,11 +113,38 @@ final class AppModel {
         do {
             let me = try await graph.me()
             phase = .signedIn(account: me.mail ?? me.userPrincipalName ?? "conta")
-            await reloadList()
+            await loadFolders()
+            selectedFolderID = wellKnown[.inbox] ?? folders.first?.id
             startPolling()
+            startBackfill()
         } catch {
             errorMessage = error.localizedDescription
             phase = .signedOut
+        }
+    }
+
+    // MARK: Pastas do servidor (só leitura)
+
+    func loadFolders() async {
+        guard let graph else { return }
+        do {
+            async let known = graph.wellKnownFolderIDs()
+            async let list = graph.folders()
+            wellKnown = try await known
+            folders = try await list
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func folder(_ id: String?) -> MailFolder? { folders.first { $0.id == id } }
+
+    private func folderChanged() async {
+        openMessage = nil
+        conversation = []
+        await reloadList()
+        if let id = selectedFolderID, (try? store.hasSynced(folder: id)) != true {
+            await syncFolder(id)
         }
     }
 
@@ -117,39 +153,90 @@ final class AppModel {
     private func startPolling() {
         pollTask?.cancel()
         pollTask = Task { [weak self] in
+            var tick = 0
             while !Task.isCancelled {
-                await self?.refresh()
+                guard let self else { return }
+                var ids = Set([self.wellKnown[.inbox], self.selectedFolderID].compactMap { $0 })
+                if tick % 10 == 9 { ids.formUnion(self.folders.map(\.id)) } // a cada 10 min, todas
+                for id in ids { await self.syncFolder(id) }
+                if tick % 10 == 9 { await self.loadFolders() }
+                tick += 1
                 try? await Task.sleep(for: .seconds(60))
             }
         }
     }
 
-    func refresh() async {
-        guard let sync, !isSyncing else { return }
-        isSyncing = true
-        syncProgress = 0
-        defer { isSyncing = false }
-        do {
-            try await sync.sync(folder: Self.folder) { [weak self] count in
-                Task { @MainActor in self?.syncProgress = count }
+    /// Primeira indexação de todas as pastas, em sequência, começando pela Caixa de Entrada.
+    private func startBackfill() {
+        backfillTask?.cancel()
+        backfillTask = Task { [weak self] in
+            guard let self else { return }
+            let ordered = [self.wellKnown[.inbox], self.wellKnown[.sentitems]].compactMap { $0 } + self.folders.map(\.id)
+            var seen = Set<String>()
+            for id in ordered where seen.insert(id).inserted {
+                if Task.isCancelled { return }
+                await self.syncFolder(id)
             }
-            await reloadList()
+        }
+    }
+
+    func refresh() async {
+        if let id = selectedFolderID { await syncFolder(id) }
+        await loadFolders()
+    }
+
+    private var syncing = Set<String>()
+
+    private func syncFolder(_ id: String) async {
+        guard let sync, !syncing.contains(id) else { return }
+        syncing.insert(id)
+        isSyncing = true
+        let name = folder(id)?.displayName ?? "pasta"
+        defer {
+            syncing.remove(id)
+            isSyncing = !syncing.isEmpty
+            if !isSyncing { syncStatus = "" }
+        }
+        do {
+            try await sync.sync(folder: id) { [weak self] count in
+                Task { @MainActor in self?.syncStatus = "\(name): \(count)" }
+            }
+            if id == selectedFolderID { await reloadList() }
         } catch {
             errorMessage = error.localizedDescription
         }
     }
 
-    // MARK: Caixa de Entrada e busca (tudo do Índice local)
+    // MARK: Lista e busca (tudo do Índice local)
 
     func reloadList() async {
         do {
-            messages = searchText.isEmpty
-                ? try store.messages(in: Self.folder)
-                : try store.search(searchText)
+            if searchText.isEmpty {
+                guard let id = selectedFolderID else { messages = []; return }
+                let page = try store.messages(in: id, limit: Self.pageSize)
+                messages = page
+                hasMore = page.count == Self.pageSize
+            } else {
+                messages = try store.search(searchText)
+                hasMore = false
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
     }
+
+    func loadMore() async {
+        guard hasMore, searchText.isEmpty, let id = selectedFolderID else { return }
+        do {
+            let page = try store.messages(in: id, limit: Self.pageSize, offset: messages.count)
+            messages += page
+            hasMore = page.count == Self.pageSize
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: Conversa
 
     func open(_ message: StoredMessage) async {
         openMessage = message
@@ -157,13 +244,8 @@ final class AppModel {
         do {
             let thread = try message.conversationId.map { try store.conversation(id: $0) } ?? [message]
             conversation = ConversationTree.build(thread.isEmpty ? [message] : thread)
-            await ensureHTML(id: message.id)
-            if !message.isRead, let graph {
-                try store.setRead(id: message.id, true)
-                if let i = messages.firstIndex(where: { $0.id == message.id }) { messages[i].isRead = true }
-                openMessage?.isRead = true
-                try await graph.markRead(id: message.id)
-            }
+            await prepareBody(id: message.id)
+            if !message.isRead { await setRead(message.id, true) }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -172,19 +254,47 @@ final class AppModel {
     func toggle(_ id: String) async {
         if expanded.contains(id) { expanded.remove(id); return }
         expanded.insert(id)
-        await ensureHTML(id: id)
+        await prepareBody(id: id)
     }
 
-    /// Mensagem fora da retenção de HTML: baixa o corpo na hora e guarda.
-    private func ensureHTML(id: String) async {
-        guard let i = conversation.firstIndex(where: { $0.id == id }),
-              conversation[i].message.bodyHTML == nil, let graph else { return }
+    /// Garante HTML (mensagem antiga baixa na hora) e embute imagens inline (assinaturas).
+    private func prepareBody(id: String) async {
+        guard let i = conversation.firstIndex(where: { $0.id == id }), let graph else { return }
+        var m = conversation[i].message
         do {
-            guard let html = try await graph.bodyHTML(id: id) else { return }
-            var m = conversation[i].message
-            m.bodyHTML = html
+            if m.bodyHTML == nil, let html = try await graph.bodyHTML(id: id) { m.bodyHTML = html }
+            if let html = m.bodyHTML, html.contains("cid:") {
+                let inline = try await graph.inlineAttachments(messageID: id)
+                m.bodyHTML = HTMLText.embedInline(html, attachments: inline)
+            }
+            guard m != conversation[i].message else { return }
             try store.upsert([m])
             if conversation.indices.contains(i), conversation[i].id == id { conversation[i].message = m }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: Ações (local primeiro, servidor depois)
+
+    func setRead(_ id: String, _ isRead: Bool) async {
+        do {
+            try store.setRead(id: id, isRead)
+            if let i = messages.firstIndex(where: { $0.id == id }) { messages[i].isRead = isRead }
+            if openMessage?.id == id { openMessage?.isRead = isRead }
+            try await graph?.markRead(id: id, isRead)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Arquivar e Apagar são ações de servidor (CONTEXT.md). Some da lista na hora; o delta confirma depois.
+    func move(_ id: String, to destination: WellKnownFolder) async {
+        do {
+            try store.delete(ids: [id])
+            messages.removeAll { $0.id == id }
+            if openMessage?.id == id { openMessage = nil; conversation = [] }
+            try await graph?.move(id: id, to: destination)
         } catch {
             errorMessage = error.localizedDescription
         }

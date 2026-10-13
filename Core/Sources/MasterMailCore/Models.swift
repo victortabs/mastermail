@@ -70,12 +70,39 @@ public struct Message: Codable, Sendable, Hashable, Identifiable {
     public var hasAttachments: Bool
     public var conversationId: String?
     public var conversationIndex: String?
+    public var categories: [String]?
     public var body: ItemBody?
 
     public static let listFields = [
         "id", "subject", "from", "toRecipients", "ccRecipients", "receivedDateTime",
-        "bodyPreview", "isRead", "hasAttachments", "conversationId", "conversationIndex",
+        "bodyPreview", "isRead", "hasAttachments", "conversationId", "conversationIndex", "categories",
     ].joined(separator: ",")
+}
+
+/// Pasta do servidor (ver CONTEXT.md): o MasterMail lê, nunca reorganiza.
+public struct MailFolder: Decodable, Sendable, Hashable, Identifiable {
+    public var id: String
+    public var displayName: String
+    public var parentFolderId: String?
+    public var childFolderCount: Int
+    public var unreadItemCount: Int
+    public var totalItemCount: Int
+    /// Preenchido localmente: nível na árvore (0 = raiz).
+    public var depth: Int = 0
+
+    enum CodingKeys: String, CodingKey {
+        case id, displayName, parentFolderId, childFolderCount, unreadItemCount, totalItemCount
+    }
+}
+
+/// Anexo (só o que precisamos para imagens inline).
+public struct Attachment: Decodable, Sendable {
+    public var id: String
+    public var name: String?
+    public var contentType: String?
+    public var contentId: String?
+    public var isInline: Bool?
+    public var contentBytes: String?
 }
 
 public struct User: Decodable, Sendable {
