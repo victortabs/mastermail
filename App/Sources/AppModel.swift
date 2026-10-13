@@ -130,7 +130,8 @@ enum WebAuth {
     static func run(url: URL, callbackScheme: String) async throws -> URL {
         let anchor = Anchor()
         return try await withCheckedThrowingContinuation { continuation in
-            let session = ASWebAuthenticationSession(url: url, callbackURLScheme: callbackScheme) { callback, error in
+            // O callback chega numa fila de fundo (XPC); @Sendable tira a isolação de MainActor herdada.
+            let session = ASWebAuthenticationSession(url: url, callbackURLScheme: callbackScheme) { @Sendable callback, error in
                 if let callback { continuation.resume(returning: callback) }
                 else { continuation.resume(throwing: error ?? OAuthError.invalidCallback) }
             }
