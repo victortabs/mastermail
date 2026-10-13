@@ -68,6 +68,7 @@ struct MailboxView: View {
         }
         .sheet(isPresented: $showPalette) { CommandPalette(commands: commands) }
         .sheet(isPresented: $showHelp) { ShortcutsHelp() }
+        .sheet(isPresented: $model.showOrganizer) { OrganizerSheet() }
         .sheet(item: $explainingFor) { _ in
             ExplanationSheet { text in explainingFor = nil; act { await model.rejectNoise($0, explanation: text) } }
         }
@@ -192,6 +193,7 @@ struct MailboxView: View {
             .init("Pessoas", "⌘3") { model.view = .people },
             .init("Atalhos", "?") { showHelp = true },
             .init("Aba lateral", "⌘⇧A") { model.showAssistant.toggle() },
+            .init("Organizar a caixa (proposta de regras e pastas)", "") { model.showOrganizer = true },
             .init("Reenviar", "") { if let id = targetID { model.startCompose(.resend(messageID: id)) } },
             .init("Encaminhar como anexo", "") { if let id = targetID { model.startCompose(.forwardAsAttachment(messageID: id)) } },
         ]
@@ -315,6 +317,7 @@ struct FolderList: View {
                 HStack {
                     Text("Pastas locais")
                     Spacer()
+                    Button { model.showOrganizer = true } label: { Image(systemName: "wand.and.stars") }.buttonStyle(.plain).help("Organizar a caixa")
                     Button { creating = true } label: { Image(systemName: "plus") }.buttonStyle(.plain)
                 }
             }

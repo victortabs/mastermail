@@ -22,6 +22,11 @@ final class ComposeModel: Identifiable {
     var cc = ""
     var subject = ""
     var body = AttributedString("")
+    /// Seleção do editor: necessária para fechar marcadores e manter o cursor no meio.
+    var selection = AttributedTextSelection()
+    private var lastPlain = ""
+    /// Marcadores fechados automaticamente que ainda estão à direita do cursor (pilha).
+    private var pendingClosers: [Character] = []
     private(set) var isBusy = true
     var error: String?
     private var originalParticipants: Set<String> = []
@@ -78,11 +83,68 @@ final class ComposeModel: Identifiable {
         }
     }
 
+    /// Chamado a cada mudança do texto: fecha marcadores (`*` → `*|*`, `**` → `**|**`) e converte Markdown.
     func applyShortcuts() {
+        autoPair()
         var text = body
         var changed = false
         while RichText.applyMarkdownShortcuts(&text) { changed = true }
-        if changed { body = text }
+        if changed { body = text; pendingClosers = [] }
+        lastPlain = String(body.characters)
+    }
+
+    private static let pairable: Set<Character> = ["*", "_", "`"]
+
+    private func autoPair() {
+        let new = String(body.characters)
+        let old = lastPlain
+        defer { lastPlain = new }
+        // Só uma inserção de um caractere, no ponto do cursor.
+        guard new.count == old.count + 1, case let .insertionPoint(cursor) = selection.indices(in: body) else {
+            if new.count != old.count { pendingClosers = [] }
+            return
+        }
+        let offset = body.characters.distance(from: body.startIndex, to: cursor)
+        guard offset > 0 else { return }
+        let typedIndex = new.index(new.startIndex, offsetBy: offset - 1)
+        let typed = new[typedIndex]
+        guard Self.pairable.contains(typed) else { return }
+        let next: Character? = offset < new.count ? new[new.index(after: typedIndex)] : nil
+        let prev: Character? = offset >= 2 ? new[new.index(before: typedIndex)] : nil
+
+        if pendingClosers.last == typed, next == typed {
+            if typed == "*", prev == "*", offset >= 2, new[new.index(typedIndex, offsetBy: -1)] == "*", isEmptyPair(new, at: offset) {
+                // "*|*" + "*" → "**|**"
+                insert(typed, atOffset: offset)
+                pendingClosers.append(typed)
+            } else {
+                // O usuário digitou o fechamento que já estava lá: pula por cima.
+                var text = body
+                let dupStart = text.index(text.startIndex, offsetByCharacters: offset)
+                text.removeSubrange(dupStart ..< text.index(dupStart, offsetByCharacters: 1))
+                body = text
+                selection = AttributedTextSelection(insertionPoint: body.index(body.startIndex, offsetByCharacters: offset))
+                pendingClosers.removeLast()
+            }
+            return
+        }
+        // Abertura: insere o fechamento depois do cursor, sem mover o cursor.
+        if let prev, prev.isLetter || prev.isNumber { return } // "snake_case", "2*3": não é formatação
+        insert(typed, atOffset: offset)
+        pendingClosers.append(typed)
+    }
+
+    /// true quando a posição está entre dois marcadores sem conteúdo ("*|*").
+    private func isEmptyPair(_ text: String, at offset: Int) -> Bool {
+        offset >= 1 && offset < text.count && text[text.index(text.startIndex, offsetBy: offset - 1)] == text[text.index(text.startIndex, offsetBy: offset)]
+    }
+
+    private func insert(_ c: Character, atOffset offset: Int) {
+        var text = body
+        let at = text.index(text.startIndex, offsetByCharacters: offset)
+        text.insert(AttributedString(String(c)), at: at)
+        body = text
+        selection = AttributedTextSelection(insertionPoint: body.index(body.startIndex, offsetByCharacters: offset))
     }
 
     private var currentRecipients: (to: [Recipient], cc: [Recipient]) { (Recipient.parseList(to), Recipient.parseList(cc)) }
@@ -172,7 +234,7 @@ struct ComposeEditor: View {
                 }
             }
             .textFieldStyle(.roundedBorder)
-            TextEditor(text: $model.body)
+            TextEditor(text: $model.body, selection: $model.selection)
                 .focused($focus, equals: .body)
                 .font(.body)
                 .frame(minHeight: inline ? 160 : 300)

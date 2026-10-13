@@ -95,6 +95,8 @@ final class AppModel {
     /// Fila offline (requisito): escritas no servidor que falharam por rede, repetidas a cada ciclo.
     private let queue = ActionQueue.default()
     private(set) var pendingCount = 0
+    let planStore = OrganizationPlanStore.default()
+    var showOrganizer = false
     /// Remetentes (endereço ou domínio) cujas imagens remotas o usuário liberou de vez.
     var trustedImageSenders: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "trustedImageSenders") ?? [])
     private(set) var aiStatus = ""
@@ -565,6 +567,38 @@ final class AppModel {
             task.cancel()
             self?.pendingSend = nil
             self?.showToast("Envio cancelado. O rascunho está em Rascunhos.")
+        }
+    }
+
+    // MARK: Organizador (proposta → Sugestão → aplicar)
+
+    /// Gera uma proposta nova com o modelo pesado (Haiku via OpenRouter). Exige nuvem ligada.
+    func generatePlan() async throws -> OrganizationPlan {
+        let settings = aiSettings.load()
+        guard settings.cloudEnabled, !settings.openRouterKey.isEmpty else {
+            throw AIError.unavailable("Ligue a nuvem e informe a chave da OpenRouter em ⌘, → IA.")
+        }
+        guard let inbox = wellKnown[.inbox] else { throw AIError.unavailable("Caixa de entrada ainda não carregada.") }
+        let profile = try store.profile(inbox: inbox, sent: wellKnown[.sentitems])
+        let organizer = Organizer(provider: OpenRouterProvider(key: settings.openRouterKey, model: settings.openRouterHeavyModel))
+        let plan = try await organizer.propose(from: profile)
+        try planStore.save(plan)
+        return plan
+    }
+
+    /// Aplica o que foi aceito: regras automáticas + pastas; classifica o índice na hora e manda as pastas ao servidor pela fila.
+    func applyPlan(_ plan: OrganizationPlan, moveExisting: Bool) async {
+        do {
+            let moved = try store.apply(plan, moveExisting: moveExisting, automatic: true)
+            reloadLocalFolders()
+            refreshCounters()
+            await reloadList()
+            for (id, folder) in moved { await queue.enqueue(.localFolder(id: id, name: folder)) }
+            pendingCount = await queue.count
+            showToast("\(plan.rules.count) regras e \(plan.folders.count) pastas aplicadas; \(moved.count) mensagens indo para as pastas no servidor")
+            Task { await drainQueue() }
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 

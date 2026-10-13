@@ -6,6 +6,8 @@ public struct AISettings: Codable, Sendable, Equatable {
     public var cloudEnabled: Bool = false
     public var openRouterKey: String = ""
     public var openRouterModel: String = "google/gemini-2.5-flash"
+    /// Modelo para tarefas pesadas (Organizador, resumos longos): Haiku 5.5 tem 1M de contexto e custa pouco.
+    public var openRouterHeavyModel: String = "anthropic/claude-haiku-5.5"
 
     public init() {}
 
@@ -16,6 +18,7 @@ public struct AISettings: Codable, Sendable, Equatable {
         cloudEnabled = try c.decodeIfPresent(Bool.self, forKey: .cloudEnabled) ?? false
         openRouterKey = try c.decodeIfPresent(String.self, forKey: .openRouterKey) ?? ""
         openRouterModel = try c.decodeIfPresent(String.self, forKey: .openRouterModel) ?? "google/gemini-2.5-flash"
+        openRouterHeavyModel = try c.decodeIfPresent(String.self, forKey: .openRouterHeavyModel) ?? "anthropic/claude-haiku-5.5"
     }
 }
 
