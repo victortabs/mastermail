@@ -11,6 +11,38 @@ public struct GraphPage<Item: Decodable & Sendable>: Decodable, Sendable {
     }
 }
 
+/// Página de delta: além de `value`, traz o link da próxima página ou o deltaLink final.
+public struct DeltaPage<Item: Decodable & Sendable>: Decodable, Sendable {
+    public let value: [Item]
+    public let nextLink: URL?
+    public let deltaLink: URL?
+
+    enum CodingKeys: String, CodingKey {
+        case value
+        case nextLink = "@odata.nextLink"
+        case deltaLink = "@odata.deltaLink"
+    }
+}
+
+/// Item de delta: ou uma Message completa, ou só o id com `@removed`.
+public struct DeltaMessage: Decodable, Sendable {
+    public let id: String
+    public let removed: Bool
+    public let message: Message?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case removed = "@removed"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        removed = container.contains(.removed)
+        message = removed ? nil : try Message(from: decoder)
+    }
+}
+
 public struct EmailAddress: Codable, Sendable, Hashable {
     public var name: String?
     public var address: String?

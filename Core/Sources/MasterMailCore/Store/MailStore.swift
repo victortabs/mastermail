@@ -1,0 +1,184 @@
+import Foundation
+import GRDB
+
+/// Uma Mensagem como fica no Índice local (ver CONTEXT.md). Texto puro de tudo; HTML guardado junto por enquanto.
+public struct StoredMessage: Codable, Sendable, Hashable, Identifiable, FetchableRecord, PersistableRecord {
+    public static let databaseTableName = "message"
+
+    public var id: String
+    public var folder: String
+    public var conversationId: String?
+    public var conversationIndex: String?
+    public var subject: String
+    public var fromName: String
+    public var fromAddress: String
+    public var recipients: String // "Nome <a@b>, Nome2 <c@d>" (Para + Cc), só para exibir e buscar
+    public var receivedAt: Date
+    public var isRead: Bool
+    public var hasAttachments: Bool
+    public var preview: String
+    public var bodyText: String
+    // ponytail: HTML de tudo. Requisito diz "só 12 meses"; podar quando o disco pesar.
+    public var bodyHTML: String?
+
+    public init(message m: Message, folder: String) {
+        id = m.id
+        self.folder = folder
+        conversationId = m.conversationId
+        conversationIndex = m.conversationIndex
+        subject = m.subject ?? ""
+        fromName = m.from?.emailAddress.name ?? ""
+        fromAddress = m.from?.emailAddress.address ?? ""
+        recipients = ((m.toRecipients ?? []) + (m.ccRecipients ?? [])).map {
+            let name = $0.emailAddress.name ?? ""
+            let address = $0.emailAddress.address ?? ""
+            return name.isEmpty ? address : "\(name) <\(address)>"
+        }.joined(separator: ", ")
+        receivedAt = m.receivedDateTime
+        isRead = m.isRead
+        hasAttachments = m.hasAttachments
+        preview = m.bodyPreview ?? ""
+        if let body = m.body {
+            if body.contentType.lowercased() == "html" {
+                bodyHTML = body.content
+                bodyText = HTMLText.plainText(from: body.content)
+            } else {
+                bodyHTML = nil
+                bodyText = body.content
+            }
+        } else {
+            bodyHTML = nil
+            bodyText = preview
+        }
+    }
+}
+
+/// Estado de sincronização por pasta do servidor.
+struct SyncState: Codable, FetchableRecord, PersistableRecord {
+    static let databaseTableName = "sync_state"
+    var folder: String
+    var deltaLink: String
+}
+
+/// O Índice local: SQLite com busca full-text (FTS5). Thread-safe (DatabasePool).
+public final class MailStore: Sendable {
+    public let pool: DatabasePool
+
+    public init(path: String) throws {
+        try FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        pool = try DatabasePool(path: path)
+        try Self.migrator.migrate(pool)
+    }
+
+    /// Banco descartável em arquivo temporário, para testes (DatabasePool não roda em memória).
+    public static func inMemory() throws -> MailStore {
+        try MailStore(path: FileManager.default.temporaryDirectory.appendingPathComponent("mastermail-\(UUID().uuidString).sqlite").path)
+    }
+
+    /// `~/Library/Application Support/MasterMail/mail.sqlite`
+    public static func defaultPath() -> String {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        return base.appendingPathComponent("MasterMail/mail.sqlite").path
+    }
+
+    static var migrator: DatabaseMigrator {
+        var migrator = DatabaseMigrator()
+        migrator.registerMigration("v1") { db in
+            try db.create(table: "message") { t in
+                t.primaryKey("id", .text)
+                t.column("folder", .text).notNull().indexed()
+                t.column("conversationId", .text).indexed()
+                t.column("conversationIndex", .text)
+                t.column("subject", .text).notNull()
+                t.column("fromName", .text).notNull()
+                t.column("fromAddress", .text).notNull().indexed()
+                t.column("recipients", .text).notNull()
+                t.column("receivedAt", .datetime).notNull().indexed()
+                t.column("isRead", .boolean).notNull()
+                t.column("hasAttachments", .boolean).notNull()
+                t.column("preview", .text).notNull()
+                t.column("bodyText", .text).notNull()
+                t.column("bodyHTML", .text)
+            }
+            try db.create(virtualTable: "message_ft", using: FTS5()) { t in
+                t.synchronize(withTable: "message")
+                t.tokenizer = .unicode61(diacritics: .remove)
+                t.column("subject")
+                t.column("fromName")
+                t.column("fromAddress")
+                t.column("recipients")
+                t.column("bodyText")
+            }
+            try db.create(table: "sync_state") { t in
+                t.primaryKey("folder", .text)
+                t.column("deltaLink", .text).notNull()
+            }
+        }
+        return migrator
+    }
+
+    // MARK: Leitura
+
+    public func messages(in folder: String, limit: Int = 200) throws -> [StoredMessage] {
+        try pool.read { db in
+            try StoredMessage
+                .filter(Column("folder") == folder)
+                .order(Column("receivedAt").desc)
+                .limit(limit)
+                .fetchAll(db)
+        }
+    }
+
+    public func message(id: String) throws -> StoredMessage? {
+        try pool.read { db in try StoredMessage.fetchOne(db, key: id) }
+    }
+
+    public func count(in folder: String) throws -> Int {
+        try pool.read { db in try StoredMessage.filter(Column("folder") == folder).fetchCount(db) }
+    }
+
+    /// Busca full-text, melhores primeiro. Aceita a sintaxe do FTS5 (aspas, OR, prefixo*); termos soltos viram prefixo.
+    public func search(_ query: String, limit: Int = 100) throws -> [StoredMessage] {
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return [] }
+        let pattern = FTS5Pattern(matchingAllPrefixesIn: trimmed)
+        guard let pattern else { return [] }
+        return try pool.read { db in
+            try StoredMessage.fetchAll(db, sql: """
+                SELECT message.* FROM message
+                JOIN message_ft ON message_ft.rowid = message.rowid
+                WHERE message_ft MATCH ?
+                ORDER BY bm25(message_ft, 10.0, 5.0, 5.0, 2.0, 1.0), message.receivedAt DESC
+                LIMIT ?
+                """, arguments: [pattern, limit])
+        }
+    }
+
+    // MARK: Escrita
+
+    public func upsert(_ messages: [StoredMessage]) throws {
+        try pool.write { db in
+            for m in messages { try m.save(db) }
+        }
+    }
+
+    public func delete(ids: [String]) throws {
+        try pool.write { db in _ = try StoredMessage.deleteAll(db, keys: ids) }
+    }
+
+    public func setRead(id: String, _ isRead: Bool) throws {
+        try pool.write { db in
+            try db.execute(sql: "UPDATE message SET isRead = ? WHERE id = ?", arguments: [isRead, id])
+        }
+    }
+
+    func deltaLink(for folder: String) throws -> URL? {
+        try pool.read { db in
+            try SyncState.fetchOne(db, key: folder).flatMap { URL(string: $0.deltaLink) }
+        }
+    }
+
+    func setDeltaLink(_ url: URL, for folder: String) throws {
+        try pool.write { db in try SyncState(folder: folder, deltaLink: url.absoluteString).save(db) }
+    }
+}

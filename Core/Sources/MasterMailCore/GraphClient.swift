@@ -40,25 +40,31 @@ public actor GraphClient {
         store.clear()
     }
 
-    public func get<T: Decodable & Sendable>(_ path: String, query: [URLQueryItem] = []) async throws -> T {
-        let data = try await send(method: "GET", path: path, query: query, body: nil)
+    public func get<T: Decodable & Sendable>(_ path: String, query: [URLQueryItem] = [], headers: [String: String] = [:]) async throws -> T {
+        var components = URLComponents(url: Self.baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
+        if !query.isEmpty { components.queryItems = query }
+        return try await get(url: components.url!, headers: headers)
+    }
+
+    /// GET numa URL completa (nextLink / deltaLink devolvidos pelo Graph).
+    public func get<T: Decodable & Sendable>(url: URL, headers: [String: String] = [:]) async throws -> T {
+        let data = try await send(method: "GET", url: url, body: nil, headers: headers)
         return try Self.decoder.decode(T.self, from: data)
     }
 
     public func post(_ path: String, json: Data) async throws {
-        _ = try await send(method: "POST", path: path, query: [], body: json)
+        _ = try await send(method: "POST", url: Self.baseURL.appendingPathComponent(path), body: json, headers: [:])
     }
 
     public func patch(_ path: String, json: Data) async throws {
-        _ = try await send(method: "PATCH", path: path, query: [], body: json)
+        _ = try await send(method: "PATCH", url: Self.baseURL.appendingPathComponent(path), body: json, headers: [:])
     }
 
-    private func send(method: String, path: String, query: [URLQueryItem], body: Data?) async throws -> Data {
-        var components = URLComponents(url: Self.baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
-        if !query.isEmpty { components.queryItems = query }
-        var request = URLRequest(url: components.url!)
+    private func send(method: String, url: URL, body: Data?, headers: [String: String]) async throws -> Data {
+        var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("Bearer \(try await validAccessToken())", forHTTPHeaderField: "Authorization")
+        for (key, value) in headers { request.setValue(value, forHTTPHeaderField: key) }
         if let body {
             request.httpBody = body
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")

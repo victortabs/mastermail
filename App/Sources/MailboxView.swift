@@ -4,17 +4,35 @@ import SwiftUI
 struct MailboxView: View {
     @Environment(AppModel.self) private var model
     let account: String
-    @State private var selection: Message.ID?
+    @State private var selection: StoredMessage.ID?
 
     var body: some View {
+        @Bindable var model = model
         NavigationSplitView {
             List(model.messages, selection: $selection) { message in
                 MessageRow(message: message)
             }
             .navigationSplitViewColumnWidth(min: 300, ideal: 380)
             .overlay {
-                if model.messages.isEmpty, !model.isLoading {
-                    ContentUnavailableView("Caixa de entrada vazia", systemImage: "tray")
+                if model.messages.isEmpty {
+                    if model.isSyncing {
+                        ContentUnavailableView("Indexando a Caixa de Entrada", systemImage: "arrow.triangle.2.circlepath", description: Text("\(model.syncProgress) mensagens"))
+                    } else if !model.searchText.isEmpty {
+                        ContentUnavailableView.search(text: model.searchText)
+                    } else {
+                        ContentUnavailableView("Caixa de entrada vazia", systemImage: "tray")
+                    }
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                if model.isSyncing, !model.messages.isEmpty {
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.small)
+                        Text("Sincronizando: \(model.syncProgress)").font(.caption).foregroundStyle(.secondary)
+                    }
+                    .padding(6)
+                    .frame(maxWidth: .infinity)
+                    .background(.bar)
                 }
             }
         } detail: {
@@ -24,13 +42,14 @@ struct MailboxView: View {
                 ContentUnavailableView("Nenhuma mensagem aberta", systemImage: "envelope.open")
             }
         }
-        .navigationTitle("Caixa de entrada")
+        .searchable(text: $model.searchText, placement: .sidebar, prompt: "Buscar no Índice local")
+        .navigationTitle(model.searchText.isEmpty ? "Caixa de entrada" : "Busca")
         .navigationSubtitle(account)
         .toolbar {
             ToolbarItem {
                 Button { Task { await model.refresh() } } label: { Label("Atualizar", systemImage: "arrow.clockwise") }
                     .keyboardShortcut("r", modifiers: [.command, .shift])
-                    .disabled(model.isLoading)
+                    .disabled(model.isSyncing)
             }
             ToolbarItem {
                 Button("Sair") { Task { await model.signOut() } }
@@ -44,22 +63,23 @@ struct MailboxView: View {
 }
 
 struct MessageRow: View {
-    let message: Message
+    let message: StoredMessage
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack {
-                Text(message.from?.emailAddress.name ?? message.from?.emailAddress.address ?? "(sem remetente)")
+                Text(message.fromName.isEmpty ? message.fromAddress : message.fromName)
                     .fontWeight(message.isRead ? .regular : .bold)
                     .lineLimit(1)
                 Spacer()
-                Text(message.receivedDateTime, format: .relative(presentation: .named))
+                if message.hasAttachments { Image(systemName: "paperclip").font(.caption).foregroundStyle(.secondary) }
+                Text(message.receivedAt, format: .relative(presentation: .named))
                     .font(.caption).foregroundStyle(.secondary)
             }
-            Text(message.subject?.isEmpty == false ? message.subject! : "(sem assunto)")
+            Text(message.subject.isEmpty ? "(sem assunto)" : message.subject)
                 .lineLimit(1)
                 .fontWeight(message.isRead ? .regular : .semibold)
-            Text(message.bodyPreview ?? "")
+            Text(message.preview)
                 .font(.caption).foregroundStyle(.secondary).lineLimit(2)
         }
         .padding(.vertical, 2)
@@ -67,28 +87,24 @@ struct MessageRow: View {
 }
 
 struct MessageDetail: View {
-    let message: Message
+    let message: StoredMessage
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(message.subject ?? "(sem assunto)").font(.title2.bold())
+            Text(message.subject.isEmpty ? "(sem assunto)" : message.subject).font(.title2.bold())
             HStack {
-                Text(message.from?.emailAddress.name ?? "").fontWeight(.semibold)
-                Text(message.from?.emailAddress.address ?? "").foregroundStyle(.secondary)
+                Text(message.fromName).fontWeight(.semibold)
+                Text(message.fromAddress).foregroundStyle(.secondary)
                 Spacer()
-                Text(message.receivedDateTime, format: .dateTime).foregroundStyle(.secondary)
+                Text(message.receivedAt, format: .dateTime).foregroundStyle(.secondary)
             }
             .font(.callout)
-            if let to = message.toRecipients, !to.isEmpty {
-                Text("Para: " + to.map { $0.emailAddress.name ?? $0.emailAddress.address ?? "" }.joined(separator: ", "))
+            if !message.recipients.isEmpty {
+                Text("Para: " + message.recipients)
                     .font(.caption).foregroundStyle(.secondary).lineLimit(2)
             }
             Divider()
-            if let body = message.body {
-                MessageBodyView(body: body)
-            } else {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
+            MessageBodyView(html: message.bodyHTML, text: message.bodyText)
         }
         .padding()
     }

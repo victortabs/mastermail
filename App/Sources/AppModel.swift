@@ -3,7 +3,7 @@ import Foundation
 import MasterMailCore
 import Observation
 
-/// Estado do app: conta, Caixa de Entrada e mensagem aberta. Um só, na main thread.
+/// Estado do app: conta, Caixa de Entrada (do Índice local) e mensagem aberta. Um só, na main thread.
 @MainActor
 @Observable
 final class AppModel {
@@ -14,18 +14,30 @@ final class AppModel {
     }
 
     private(set) var phase: Phase = .needsClientID
-    private(set) var messages: [Message] = []
-    private(set) var openMessage: Message?
-    private(set) var isLoading = false
+    private(set) var messages: [StoredMessage] = []
+    private(set) var openMessage: StoredMessage?
+    private(set) var isSyncing = false
+    /// Quantidade de mensagens processadas na sincronização em curso (primeira indexação é longa).
+    private(set) var syncProgress = 0
+    var searchText = "" { didSet { if searchText != oldValue { Task { await reloadList() } } } }
     var errorMessage: String?
 
     private var graph: GraphClient?
-    private let store = TokenStore.default()
+    private var sync: MailSync?
+    private let tokenStore = TokenStore.default()
+    private let store: MailStore
+    private var pollTask: Task<Void, Never>?
 
     static let redirectScheme = "msauth.\(Bundle.main.bundleIdentifier ?? "io.github.victortabs.mastermail")"
     static let clientIDDefaultsKey = "MasterMailClientID"
+    static let folder = "inbox"
 
     init() {
+        do {
+            store = try MailStore(path: MailStore.defaultPath())
+        } catch {
+            fatalError("Não abriu o Índice local: \(error)")
+        }
         if let id = Self.storedClientID { configure(clientID: id) }
     }
 
@@ -46,8 +58,9 @@ final class AppModel {
 
     private func configure(clientID: String) {
         let config = OAuthConfig(clientID: clientID, redirectURI: "\(Self.redirectScheme)://auth")
-        let client = GraphClient(config: config, store: store)
+        let client = GraphClient(config: config, store: tokenStore)
         graph = client
+        sync = MailSync(graph: client, store: store)
         phase = .signedOut
         Task {
             if await client.isSignedIn { await loadAccount() }
@@ -76,6 +89,7 @@ final class AppModel {
     }
 
     func signOut() async {
+        pollTask?.cancel()
         await graph?.signOut()
         messages = []
         openMessage = nil
@@ -87,37 +101,61 @@ final class AppModel {
         do {
             let me = try await graph.me()
             phase = .signedIn(account: me.mail ?? me.userPrincipalName ?? "conta")
-            await refresh()
+            await reloadList()
+            startPolling()
         } catch {
             errorMessage = error.localizedDescription
             phase = .signedOut
         }
     }
 
-    // MARK: Caixa de Entrada
+    // MARK: Sincronização (polling de 60 s com o app aberto, ADR 0003)
+
+    private func startPolling() {
+        pollTask?.cancel()
+        pollTask = Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.refresh()
+                try? await Task.sleep(for: .seconds(60))
+            }
+        }
+    }
 
     func refresh() async {
-        guard let graph else { return }
-        isLoading = true
-        defer { isLoading = false }
+        guard let sync, !isSyncing else { return }
+        isSyncing = true
+        syncProgress = 0
+        defer { isSyncing = false }
         do {
-            messages = try await graph.inbox(top: 50)
+            try await sync.sync(folder: Self.folder) { [weak self] count in
+                Task { @MainActor in self?.syncProgress = count }
+            }
+            await reloadList()
         } catch {
             errorMessage = error.localizedDescription
         }
     }
 
-    func open(_ message: Message) async {
-        guard let graph else { return }
-        openMessage = message
+    // MARK: Caixa de Entrada e busca (tudo do Índice local)
+
+    func reloadList() async {
         do {
-            let full = try await graph.message(id: message.id)
-            guard openMessage?.id == message.id else { return }
-            openMessage = full
-            if !full.isRead {
-                try await graph.markRead(id: message.id)
-                if let i = messages.firstIndex(where: { $0.id == message.id }) { messages[i].isRead = true }
-            }
+            messages = searchText.isEmpty
+                ? try store.messages(in: Self.folder)
+                : try store.search(searchText)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func open(_ message: StoredMessage) async {
+        openMessage = message
+        guard !message.isRead, let graph else { return }
+        do {
+            try store.setRead(id: message.id, true)
+            if let i = messages.firstIndex(where: { $0.id == message.id }) { messages[i].isRead = true }
+            openMessage?.isRead = true
+            try await graph.markRead(id: message.id)
         } catch {
             errorMessage = error.localizedDescription
         }

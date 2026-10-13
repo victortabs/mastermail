@@ -4,7 +4,8 @@ import WebKit
 
 /// Mostra o corpo da mensagem num WKWebView isolado. Imagens remotas e scripts bloqueados por padrão (requisito Must).
 struct MessageBodyView: NSViewRepresentable {
-    let body: ItemBody
+    let html: String?
+    let text: String
 
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
@@ -17,18 +18,16 @@ struct MessageBodyView: NSViewRepresentable {
     }
 
     func updateNSView(_ web: WKWebView, context: Context) {
-        guard context.coordinator.lastLoaded != body else { return }
-        context.coordinator.lastLoaded = body
-        let html = body.contentType.lowercased() == "html"
-            ? body.content
-            : "<pre style=\"white-space:pre-wrap;font-family:-apple-system\">\(body.content.htmlEscaped)</pre>"
-        web.loadHTMLString(Self.wrap(html), baseURL: nil)
+        let content = html ?? "<pre style=\"white-space:pre-wrap;font-family:-apple-system\">\(text.htmlEscaped)</pre>"
+        guard context.coordinator.lastLoaded != content else { return }
+        context.coordinator.lastLoaded = content
+        web.loadHTMLString(Self.wrap(content), baseURL: nil)
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     final class Coordinator: NSObject, WKNavigationDelegate {
-        var lastLoaded: ItemBody?
+        var lastLoaded: String?
 
         /// Links abrem no navegador do sistema, nunca dentro da mensagem.
         func webView(_: WKWebView, decidePolicyFor action: WKNavigationAction) async -> WKNavigationActionPolicy {
