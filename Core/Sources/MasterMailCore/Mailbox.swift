@@ -54,6 +54,12 @@ public extension GraphClient {
         try await patch("me/messages/\(id)", json: Data(#"{"isRead": \#(isRead)}"#.utf8))
     }
 
+    /// Grava (ou limpa, com nil) a Pasta local na própria mensagem (ADR 0006).
+    func setLocalFolder(id: String, _ name: String?) async throws {
+        let patch = ["singleValueExtendedProperties": [ExtendedProperty(id: ExtendedProperty.localFolderID, value: name ?? "")]]
+        try await self.patch("me/messages/\(id)", json: JSONEncoder().encode(patch))
+    }
+
     /// Move para uma pasta do servidor (arquivar = archive, apagar = deleteditems).
     func move(id: String, to destination: WellKnownFolder) async throws {
         try await post("me/messages/\(id)/move", json: Data(#"{"destinationId": "\#(destination.rawValue)"}"#.utf8))

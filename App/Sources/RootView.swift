@@ -55,3 +55,8 @@ struct SignInView: View {
         .padding(40)
     }
 }
+
+/// Para usar um id de mensagem como item de `.sheet(item:)`.
+extension String: @retroactive Identifiable {
+    public var id: String { self }
+}

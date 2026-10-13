@@ -63,3 +63,24 @@ struct InlineImageTests {
         #expect(out == #"<p>Assinatura</p><img src="data:image/png;base64,AAAA">"#)
     }
 }
+
+struct LocalFolderTests {
+    @Test func localFolderComesFromExtendedPropertyAndLeavesInbox() throws {
+        let store = try MailStore.inMemory()
+        let json = """
+        {"id":"1","receivedDateTime":"2026-10-13T12:00:00Z","isRead":true,"hasAttachments":false,
+         "singleValueExtendedProperties":[{"id":"\(ExtendedProperty.localFolderID)","value":"Obras"}]}
+        """
+        let m = StoredMessage(message: try GraphClient.decoder.decode(Message.self, from: Data(json.utf8)), folder: "inbox")
+        #expect(m.localFolder == "Obras")
+        try store.upsert([m])
+        #expect(try store.messages(in: "inbox").isEmpty)
+        #expect(try store.messages(localFolder: "Obras").map(\.id) == ["1"])
+        try store.createLocalFolder("Vazia")
+        #expect(try store.localFolders() == ["Obras", "Vazia"])
+        #expect(try store.renameLocalFolder("Obras", to: "Projetos") == ["1"])
+        #expect(try store.localFolders() == ["Projetos", "Vazia"])
+        try store.setLocalFolder(id: "1", nil)
+        #expect(try store.messages(in: "inbox").map(\.id) == ["1"])
+    }
+}

@@ -41,7 +41,10 @@ public struct MailSync: Sendable {
 
     static func initialDeltaURL(folder: String) -> URL {
         var components = URLComponents(url: GraphClient.baseURL.appendingPathComponent("me/mailFolders/\(folder)/messages/delta"), resolvingAgainstBaseURL: false)!
-        components.queryItems = [.init(name: "$select", value: Message.listFields + ",body")]
+        components.queryItems = [
+            .init(name: "$select", value: Message.listFields + ",body"),
+            .init(name: "$expand", value: ExtendedProperty.expand),
+        ]
         return components.url!
     }
 }

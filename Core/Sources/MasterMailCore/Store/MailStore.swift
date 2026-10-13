@@ -19,6 +19,8 @@ public struct StoredMessage: Codable, Sendable, Hashable, Identifiable, Fetchabl
     public var preview: String
     /// Categorias do Outlook (ver CONTEXT.md: Categoria). GRDB guarda como JSON.
     public var categories: [String]
+    /// Pasta local (CONTEXT.md). nil = está na Caixa de entrada (se a pasta do servidor for a Inbox).
+    public var localFolder: String?
     public var bodyText: String
     /// HTML só dos últimos 12 meses (requisito); mais antigo fica nil e é baixado ao abrir.
     public var bodyHTML: String?
@@ -43,6 +45,7 @@ public struct StoredMessage: Codable, Sendable, Hashable, Identifiable, Fetchabl
         hasAttachments = m.hasAttachments
         preview = m.bodyPreview ?? ""
         categories = m.categories ?? []
+        localFolder = m.localFolder
         if let body = m.body {
             if body.contentType.lowercased() == "html" {
                 bodyHTML = m.receivedDateTime.timeIntervalSinceNow > -Self.htmlRetention ? body.content : nil
@@ -155,18 +158,64 @@ public final class MailStore: Sendable {
                 t.column("deltaLink", .text).notNull()
             }
         }
+        migrator.registerMigration("v3") { db in
+            try db.alter(table: "message") { t in t.add(column: "localFolder", .text).indexed() }
+            try db.create(table: "local_folder") { t in t.primaryKey("name", .text) }
+        }
         return migrator
     }
 
     // MARK: Leitura
 
+    /// Mensagens de uma pasta do servidor que não estão em Pasta local (é a Caixa de entrada quando folder = Inbox).
     public func messages(in folder: String, limit: Int = 300, offset: Int = 0) throws -> [StoredMessage] {
         try pool.read { db in
             try StoredMessage
-                .filter(Column("folder") == folder)
+                .filter(Column("folder") == folder && Column("localFolder") == nil)
                 .order(Column("receivedAt").desc)
                 .limit(limit, offset: offset)
                 .fetchAll(db)
+        }
+    }
+
+    public func messages(localFolder name: String, limit: Int = 300, offset: Int = 0) throws -> [StoredMessage] {
+        try pool.read { db in
+            try StoredMessage
+                .filter(Column("localFolder") == name)
+                .order(Column("receivedAt").desc)
+                .limit(limit, offset: offset)
+                .fetchAll(db)
+        }
+    }
+
+    // MARK: Pastas locais (nomes = tabela própria ∪ valores presentes nas mensagens)
+
+    public func localFolders() throws -> [String] {
+        try pool.read { db in
+            let own = try String.fetchAll(db, sql: "SELECT name FROM local_folder")
+            let used = try String.fetchAll(db, sql: "SELECT DISTINCT localFolder FROM message WHERE localFolder IS NOT NULL")
+            return Array(Set(own + used)).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+        }
+    }
+
+    public func createLocalFolder(_ name: String) throws {
+        try pool.write { db in try db.execute(sql: "INSERT OR IGNORE INTO local_folder(name) VALUES (?)", arguments: [name]) }
+    }
+
+    /// Renomeia no índice e devolve os ids das mensagens afetadas (o chamador grava no servidor).
+    public func renameLocalFolder(_ old: String, to new: String) throws -> [String] {
+        try pool.write { db in
+            try db.execute(sql: "DELETE FROM local_folder WHERE name = ?", arguments: [old])
+            try db.execute(sql: "INSERT OR IGNORE INTO local_folder(name) VALUES (?)", arguments: [new])
+            let ids = try String.fetchAll(db, sql: "SELECT id FROM message WHERE localFolder = ?", arguments: [old])
+            try db.execute(sql: "UPDATE message SET localFolder = ? WHERE localFolder = ?", arguments: [new, old])
+            return ids
+        }
+    }
+
+    public func setLocalFolder(id: String, _ name: String?) throws {
+        try pool.write { db in
+            try db.execute(sql: "UPDATE message SET localFolder = ? WHERE id = ?", arguments: [name, id])
         }
     }
 

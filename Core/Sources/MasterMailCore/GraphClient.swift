@@ -56,6 +56,15 @@ public actor GraphClient {
         _ = try await send(method: "POST", url: Self.baseURL.appendingPathComponent(path), body: json, headers: [:])
     }
 
+    public func postDecoding<T: Decodable & Sendable>(_ path: String, json: Data) async throws -> T {
+        let data = try await send(method: "POST", url: Self.baseURL.appendingPathComponent(path), body: json, headers: [:])
+        return try Self.decoder.decode(T.self, from: data)
+    }
+
+    public func delete(_ path: String) async throws {
+        _ = try await send(method: "DELETE", url: Self.baseURL.appendingPathComponent(path), body: nil, headers: [:])
+    }
+
     public func patch(_ path: String, json: Data) async throws {
         _ = try await send(method: "PATCH", url: Self.baseURL.appendingPathComponent(path), body: json, headers: [:])
     }

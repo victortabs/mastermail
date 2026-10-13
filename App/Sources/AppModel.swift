@@ -14,9 +14,22 @@ final class AppModel {
     }
 
     private(set) var phase: Phase = .needsClientID
+    /// O que está selecionado na lateral: uma pasta da conta ou uma Pasta local.
+    enum SidebarItem: Hashable {
+        case account(WellKnownFolder)
+        case local(String)
+    }
+
+    /// Pastas do servidor: só para indexar tudo e para contadores. Nunca aparecem como navegação.
     private(set) var folders: [MailFolder] = []
     private(set) var wellKnown: [WellKnownFolder: String] = [:]
-    var selectedFolderID: String? { didSet { if selectedFolderID != oldValue { Task { await folderChanged() } } } }
+    private(set) var localFolders: [String] = []
+    var selection: SidebarItem? = .account(.inbox) { didSet { if selection != oldValue { Task { await folderChanged() } } } }
+    /// Pasta do servidor correspondente à seleção (nil para Pasta local).
+    var selectedFolderID: String? {
+        if case let .account(known) = selection { return wellKnown[known] }
+        return nil
+    }
     private(set) var messages: [StoredMessage] = []
     private(set) var hasMore = false
     private(set) var openMessage: StoredMessage?
@@ -114,7 +127,8 @@ final class AppModel {
             let me = try await graph.me()
             phase = .signedIn(account: me.mail ?? me.userPrincipalName ?? "conta")
             await loadFolders()
-            selectedFolderID = wellKnown[.inbox] ?? folders.first?.id
+            reloadLocalFolders()
+            await folderChanged()
             startPolling()
             startBackfill()
         } catch {
@@ -138,6 +152,49 @@ final class AppModel {
     }
 
     func folder(_ id: String?) -> MailFolder? { folders.first { $0.id == id } }
+
+    func unreadCount(_ known: WellKnownFolder) -> Int { folder(wellKnown[known])?.unreadItemCount ?? 0 }
+
+    // MARK: Pastas locais (CONTEXT.md; ADR 0006: gravadas na mensagem, no servidor)
+
+    private func reloadLocalFolders() {
+        localFolders = (try? store.localFolders()) ?? []
+    }
+
+    func createLocalFolder(_ name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        try? store.createLocalFolder(trimmed)
+        reloadLocalFolders()
+        selection = .local(trimmed)
+    }
+
+    func renameLocalFolder(_ old: String, to new: String) async {
+        let trimmed = new.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, trimmed != old else { return }
+        do {
+            let ids = try store.renameLocalFolder(old, to: trimmed)
+            reloadLocalFolders()
+            if selection == .local(old) { selection = .local(trimmed) }
+            for id in ids { try await graph?.setLocalFolder(id: id, trimmed) }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Move para uma Pasta local (nil = volta para a Caixa de entrada). Local primeiro, servidor depois.
+    func moveToLocalFolder(_ id: String, _ name: String?) async {
+        do {
+            if let name { try store.createLocalFolder(name) }
+            try store.setLocalFolder(id: id, name)
+            reloadLocalFolders()
+            messages.removeAll { $0.id == id }
+            if openMessage?.id == id { openMessage = nil; conversation = [] }
+            try await graph?.setLocalFolder(id: id, name)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
 
     private func folderChanged() async {
         openMessage = nil
@@ -209,11 +266,18 @@ final class AppModel {
 
     // MARK: Lista e busca (tudo do Índice local)
 
+    private func page(offset: Int) throws -> [StoredMessage] {
+        switch selection {
+        case let .local(name): try store.messages(localFolder: name, limit: Self.pageSize, offset: offset)
+        case .account: try selectedFolderID.map { try store.messages(in: $0, limit: Self.pageSize, offset: offset) } ?? []
+        case nil: []
+        }
+    }
+
     func reloadList() async {
         do {
             if searchText.isEmpty {
-                guard let id = selectedFolderID else { messages = []; return }
-                let page = try store.messages(in: id, limit: Self.pageSize)
+                let page = try page(offset: 0)
                 messages = page
                 hasMore = page.count == Self.pageSize
             } else {
@@ -226,9 +290,9 @@ final class AppModel {
     }
 
     func loadMore() async {
-        guard hasMore, searchText.isEmpty, let id = selectedFolderID else { return }
+        guard hasMore, searchText.isEmpty else { return }
         do {
-            let page = try store.messages(in: id, limit: Self.pageSize, offset: messages.count)
+            let page = try page(offset: messages.count)
             messages += page
             hasMore = page.count == Self.pageSize
         } catch {

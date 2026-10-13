@@ -72,11 +72,33 @@ public struct Message: Codable, Sendable, Hashable, Identifiable {
     public var conversationIndex: String?
     public var categories: [String]?
     public var body: ItemBody?
+    public var singleValueExtendedProperties: [ExtendedProperty]?
+
+    /// Pasta local gravada na mensagem (ADR 0006), ou nil.
+    public var localFolder: String? {
+        let value = singleValueExtendedProperties?.first { $0.id.caseInsensitiveCompare(ExtendedProperty.localFolderID) == .orderedSame }?.value
+        return (value?.isEmpty == false) ? value : nil
+    }
 
     public static let listFields = [
         "id", "subject", "from", "toRecipients", "ccRecipients", "receivedDateTime",
         "bodyPreview", "isRead", "hasAttachments", "conversationId", "conversationIndex", "categories",
     ].joined(separator: ",")
+}
+
+/// Propriedade estendida de valor único do Graph. É como a Pasta local vive no servidor (ADR 0006).
+public struct ExtendedProperty: Codable, Sendable, Hashable {
+    public var id: String
+    public var value: String
+
+    /// GUID próprio do MasterMail + nome. O Outlook ignora.
+    public static let localFolderID = "String {a7f3d9c0-6b2e-4c8f-9d1a-5e4b3c2d1f00} Name MasterMailFolder"
+    public static let expand = "singleValueExtendedProperties($filter=id eq '\(localFolderID)')"
+
+    public init(id: String, value: String) {
+        self.id = id
+        self.value = value
+    }
 }
 
 /// Pasta do servidor (ver CONTEXT.md): o MasterMail lê, nunca reorganiza.

@@ -33,7 +33,7 @@ Etiqueta colorida da conta Microsoft, guardada no servidor e visível em qualque
 _Evitar_: tag, label, etiqueta (são a mesma coisa; usar sempre Categoria)
 
 **Pasta do servidor**:
-Pasta da caixa postal Microsoft (Caixa de Entrada, Enviados, etc.). O MasterMail lê, mas não reorganiza nem cria.
+Pasta da caixa postal Microsoft. O MasterMail indexa todas para a busca, mostra só as padrão (Caixa de Entrada, Enviados, Rascunhos, Arquivo, Lixeira, Lixo eletrônico) e nunca navega pelas demais, reorganiza ou cria. Organizar é com Pasta local.
 _Evitar_: folder, pasta do Outlook
 
 **Pasta local**:
