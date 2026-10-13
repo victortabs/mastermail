@@ -28,6 +28,27 @@ public enum HTMLText {
         return out
     }
 
+    /// Recolhe o histórico citado dentro da mensagem (a Conversa já mostra as anteriores). Sem JavaScript: usa <details>.
+    public static func collapseQuotes(_ html: String) -> String {
+        let markers: [Regex<Substring>] = [
+            /<div[^>]*id="?divRplyFwdMsg"?/,            // Outlook
+            /<div[^>]*class="?gmail_quote/,              // Gmail
+            /<blockquote[^>]*type="?cite"?/,             // Apple Mail
+            /<hr[^>]*>\s*(?:<[^>]+>\s*)*(?:De|From|Von|Da)\s*:/, // separador "De:" depois de uma linha
+            /<div[^>]*class="?(?:moz-cite-prefix|OutlookMessageHeader)/,
+        ]
+        var cut: String.Index?
+        for marker in markers {
+            if let m = html.firstMatch(of: marker) {
+                if cut == nil || m.range.lowerBound < cut! { cut = m.range.lowerBound }
+            }
+        }
+        guard let cut, html.distance(from: html.startIndex, to: cut) > 20 else { return html }
+        let head = String(html[..<cut])
+        let tail = String(html[cut...])
+        return head + "<details class=\"mm-quote\"><summary>··· citação</summary>" + tail + "</details>"
+    }
+
     private static let named: [String: String] = [
         "amp": "&", "lt": "<", "gt": ">", "quot": "\"", "apos": "'", "nbsp": "\u{00A0}",
         "ccedil": "ç", "Ccedil": "Ç", "atilde": "ã", "Atilde": "Ã", "otilde": "õ", "Otilde": "Õ",

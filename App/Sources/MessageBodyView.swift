@@ -17,13 +17,20 @@ struct MessageBodyView: NSViewRepresentable {
         let web = PassthroughWebView(frame: .zero, configuration: config)
         web.navigationDelegate = context.coordinator
         context.coordinator.onHeight = { h in Task { @MainActor in height = max(40, h) } }
+        web.onClick = { [weak web, weak coordinator = context.coordinator] in
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(50))
+                guard let web else { return }
+                coordinator?.webView(web, didFinish: nil)
+            }
+        }
         web.setValue(false, forKey: "drawsBackground")
         if !allowRemote { Task { await Self.applyBlockList(to: config.userContentController) } }
         return web
     }
 
     func updateNSView(_ web: WKWebView, context: Context) {
-        let content = html ?? "<pre style=\"white-space:pre-wrap;font-family:-apple-system\">\(text.htmlEscaped)</pre>"
+        let content = html.map(HTMLText.collapseQuotes) ?? "<pre style=\"white-space:pre-wrap;font-family:-apple-system\">\(text.htmlEscaped)</pre>"
         guard context.coordinator.lastLoaded != content else { return }
         context.coordinator.lastLoaded = content
         web.loadHTMLString(Self.wrap(content), baseURL: nil)
@@ -41,21 +48,25 @@ struct MessageBodyView: NSViewRepresentable {
             }
         }
 
-        /// Links abrem no navegador do sistema, nunca dentro da mensagem.
-        func webView(_: WKWebView, decidePolicyFor action: WKNavigationAction) async -> WKNavigationActionPolicy {
+        /// Clique em "··· citação": o conteúdo cresce, mede de novo.
+        func webView(_ web: WKWebView, didCommit _: WKNavigation!) {}
+        func webView(_ web: WKWebView, decidePolicyFor action: WKNavigationAction, preferences: WKWebpagePreferences) async -> (WKNavigationActionPolicy, WKWebpagePreferences) {
             if action.navigationType == .linkActivated, let url = action.request.url {
                 NSWorkspace.shared.open(url)
-                return .cancel
+                return (.cancel, preferences)
             }
-            return .allow
+            return (.allow, preferences)
         }
+
     }
 
     private static func wrap(_ html: String) -> String {
         """
         <!doctype html><meta charset="utf-8">
         <style>body{font:14px -apple-system,sans-serif;color:CanvasText;background:transparent;margin:0}
-        @media (prefers-color-scheme: dark){body{color:#ddd}} img{max-width:100%}</style>
+        @media (prefers-color-scheme: dark){body{color:#ddd}} img{max-width:100%}
+        details.mm-quote>summary{color:#888;cursor:pointer;font-size:12px;margin:8px 0;list-style:none}
+        details.mm-quote>summary::before{content:"";display:inline-block;width:24px;border-top:1px solid #aaa;margin-right:6px;vertical-align:middle}</style>
         \(html)
         """
     }
@@ -72,8 +83,15 @@ struct MessageBodyView: NSViewRepresentable {
 
 /// A mensagem cabe inteira (altura medida), então a roda do mouse vai para o ScrollView de fora.
 final class PassthroughWebView: WKWebView {
+    var onClick: (() -> Void)?
+
     override func scrollWheel(with event: NSEvent) {
         nextResponder?.scrollWheel(with: event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        super.mouseUp(with: event)
+        onClick?()
     }
 }
 

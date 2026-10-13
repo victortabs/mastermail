@@ -84,3 +84,39 @@ struct LocalFolderTests {
         #expect(try store.messages(in: "inbox").map(\.id) == ["1"])
     }
 }
+
+struct QuoteAndFollowUpTests {
+    @Test func outlookQuoteIsCollapsed() {
+        let html = "<div>Minha resposta aqui.</div><div id=\"divRplyFwdMsg\"><b>De:</b> Marina</div><div>texto antigo</div>"
+        let out = HTMLText.collapseQuotes(html)
+        #expect(out.hasPrefix("<div>Minha resposta aqui.</div><details"))
+        #expect(out.contains("··· citação"))
+        #expect(HTMLText.collapseQuotes("<p>sem citação</p>") == "<p>sem citação</p>")
+    }
+
+    private func msg(_ id: String, folder: String, from: String, conv: String, hoursAgo: Double) -> StoredMessage {
+        let json = """
+        {"id":"\(id)","conversationId":"\(conv)","from":{"emailAddress":{"address":"\(from)"}},"isRead":true,"hasAttachments":false,
+         "receivedDateTime":"\(ISO8601DateFormatter().string(from: Date().addingTimeInterval(-hoursAgo * 3600)))"}
+        """
+        return StoredMessage(message: try! GraphClient.decoder.decode(Message.self, from: Data(json.utf8)), folder: folder)
+    }
+
+    @Test func followUpListsAndSnooze() throws {
+        let store = try MailStore.inMemory()
+        try store.upsert([
+            msg("a1", folder: "sent", from: "me@x.com", conv: "A", hoursAgo: 100),   // eu mandei, ninguém respondeu → sem resposta deles
+            msg("b1", folder: "sent", from: "me@x.com", conv: "B", hoursAgo: 100),
+            msg("b2", folder: "inbox", from: "ana@y.com", conv: "B", hoursAgo: 5),  // ela respondeu por último → sem resposta sua
+            msg("c1", folder: "inbox", from: "bob@z.com", conv: "C", hoursAgo: 5),  // nunca respondi nada nessa → não é pendência
+            msg("d1", folder: "sent", from: "me@x.com", conv: "D", hoursAgo: 1),    // recente demais
+        ])
+        #expect(try store.awaitingTheirReply(sent: "sent", me: "me@x.com").map(\.id) == ["a1", "b1"].filter { $0 == "a1" } + [])
+        #expect(try store.awaitingMyReply(inbox: "inbox", me: "me@x.com").map(\.id) == ["b2"])
+        try store.setSnooze(id: "c1", until: Date().addingTimeInterval(3600))
+        #expect(try store.messages(in: "inbox").map(\.id) == ["b2"])
+        #expect(try store.snoozed().map(\.id) == ["c1"])
+        try store.setSnooze(id: "c1", until: Date().addingTimeInterval(-1))
+        #expect(try store.messages(in: "inbox").map(\.id) == ["b2", "c1"])
+    }
+}

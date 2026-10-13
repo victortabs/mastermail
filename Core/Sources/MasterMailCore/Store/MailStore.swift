@@ -21,6 +21,9 @@ public struct StoredMessage: Codable, Sendable, Hashable, Identifiable, Fetchabl
     public var categories: [String]
     /// Pasta local (CONTEXT.md). nil = está na Caixa de entrada (se a pasta do servidor for a Inbox).
     public var localFolder: String?
+    /// Adiar (CONTEXT.md): escondida da Caixa de entrada até esta hora. Só local.
+    public var snoozedUntil: Date?
+    public var isFlagged: Bool = false
     public var bodyText: String
     /// HTML só dos últimos 12 meses (requisito); mais antigo fica nil e é baixado ao abrir.
     public var bodyHTML: String?
@@ -46,6 +49,7 @@ public struct StoredMessage: Codable, Sendable, Hashable, Identifiable, Fetchabl
         preview = m.bodyPreview ?? ""
         categories = m.categories ?? []
         localFolder = m.localFolder
+        isFlagged = m.isFlagged
         if let body = m.body {
             if body.contentType.lowercased() == "html" {
                 bodyHTML = m.receivedDateTime.timeIntervalSinceNow > -Self.htmlRetention ? body.content : nil
@@ -162,19 +166,66 @@ public final class MailStore: Sendable {
             try db.alter(table: "message") { t in t.add(column: "localFolder", .text).indexed() }
             try db.create(table: "local_folder") { t in t.primaryKey("name", .text) }
         }
+        migrator.registerMigration("v4") { db in
+            try db.alter(table: "message") { t in
+                t.add(column: "snoozedUntil", .datetime).indexed()
+                t.add(column: "isFlagged", .boolean).notNull().defaults(to: false)
+            }
+        }
         return migrator
     }
 
     // MARK: Leitura
 
-    /// Mensagens de uma pasta do servidor que não estão em Pasta local (é a Caixa de entrada quando folder = Inbox).
+    /// Mensagens de uma pasta do servidor que não estão em Pasta local nem adiadas (é a Caixa de entrada quando folder = Inbox).
     public func messages(in folder: String, limit: Int = 300, offset: Int = 0) throws -> [StoredMessage] {
         try pool.read { db in
             try StoredMessage
                 .filter(Column("folder") == folder && Column("localFolder") == nil)
+                .filter(Column("snoozedUntil") == nil || Column("snoozedUntil") <= Date())
                 .order(Column("receivedAt").desc)
                 .limit(limit, offset: offset)
                 .fetchAll(db)
+        }
+    }
+
+    public func snoozed(limit: Int = 300, offset: Int = 0) throws -> [StoredMessage] {
+        try pool.read { db in
+            try StoredMessage.filter(Column("snoozedUntil") > Date()).order(Column("snoozedUntil")).limit(limit, offset: offset).fetchAll(db)
+        }
+    }
+
+    public func setSnooze(id: String, until: Date?) throws {
+        try pool.write { db in try db.execute(sql: "UPDATE message SET snoozedUntil = ? WHERE id = ?", arguments: [until, id]) }
+    }
+
+    public func setFlagged(id: String, _ flagged: Bool) throws {
+        try pool.write { db in try db.execute(sql: "UPDATE message SET isFlagged = ? WHERE id = ?", arguments: [flagged, id]) }
+    }
+
+    /// Mensagens recebidas (na pasta `inbox`) que são a última da Conversa e vieram de outra pessoa: esperam resposta sua.
+    public func awaitingMyReply(inbox: String, me: String, limit: Int = 200) throws -> [StoredMessage] {
+        try pool.read { db in
+            try StoredMessage.fetchAll(db, sql: """
+                SELECT m.* FROM message m
+                WHERE m.folder = ? AND m.localFolder IS NULL AND lower(m.fromAddress) != lower(?)
+                  AND m.conversationId IS NOT NULL
+                  AND m.receivedAt = (SELECT max(receivedAt) FROM message x WHERE x.conversationId = m.conversationId)
+                  AND EXISTS (SELECT 1 FROM message y WHERE y.conversationId = m.conversationId AND lower(y.fromAddress) = lower(?))
+                ORDER BY m.receivedAt DESC LIMIT ?
+                """, arguments: [inbox, me, me, limit])
+        }
+    }
+
+    /// Mensagens que você enviou (pasta `sent`) há mais de `days` dias e que continuam sendo a última da Conversa: sem resposta deles.
+    public func awaitingTheirReply(sent: String, me: String, days: Int = 2, limit: Int = 200) throws -> [StoredMessage] {
+        try pool.read { db in
+            try StoredMessage.fetchAll(db, sql: """
+                SELECT m.* FROM message m
+                WHERE m.folder = ? AND m.conversationId IS NOT NULL AND m.receivedAt < ?
+                  AND m.receivedAt = (SELECT max(receivedAt) FROM message x WHERE x.conversationId = m.conversationId)
+                ORDER BY m.receivedAt DESC LIMIT ?
+                """, arguments: [sent, Date().addingTimeInterval(-Double(days) * 86400), limit])
         }
     }
 
@@ -267,9 +318,17 @@ public final class MailStore: Sendable {
 
     // MARK: Escrita
 
+    /// Grava o que veio do servidor sem perder o que é só local (Pasta local reconciliada, Adiar).
     public func upsert(_ messages: [StoredMessage]) throws {
         try pool.write { db in
-            for m in messages { try m.save(db) }
+            for var m in messages {
+                if let existing = try StoredMessage.fetchOne(db, key: m.id) {
+                    if m.localFolder == nil { m.localFolder = existing.localFolder }
+                    m.snoozedUntil = existing.snoozedUntil
+                    if m.bodyHTML == nil { m.bodyHTML = existing.bodyHTML }
+                }
+                try m.save(db)
+            }
         }
     }
 

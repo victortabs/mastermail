@@ -7,6 +7,9 @@ struct MailboxView: View {
     @State private var selection: StoredMessage.ID?
     @FocusState private var searchFocused: Bool
     @State private var pickingFolderFor: String?
+    @State private var snoozingFor: String?
+    @State private var showPalette = false
+    @State private var showHelp = false
 
     var body: some View {
         @Bindable var model = model
@@ -20,7 +23,7 @@ struct MailboxView: View {
             if model.openMessage != nil {
                 ConversationView()
             } else {
-                ContentUnavailableView("Nenhuma mensagem aberta", systemImage: "envelope.open")
+                ContentUnavailableView("Nenhuma mensagem aberta", systemImage: "envelope.open", description: Text("j / k navegam · Enter entra na conversa · ? mostra os atalhos"))
             }
         }
         .searchable(text: $model.searchText, placement: .toolbar, prompt: "Buscar no Índice local")
@@ -32,64 +35,104 @@ struct MailboxView: View {
             ToolbarItemGroup {
                 Button { model.startCompose(.new) } label: { Label("Nova mensagem", systemImage: "square.and.pencil") }
                     .keyboardShortcut("n", modifiers: .command)
-                Button { if let id = targetID { model.startCompose(.reply(messageID: id, all: true)) } } label: { Label("Responder", systemImage: "arrowshape.turn.up.left.2") }
-                    .disabled(targetID == nil)
-                Button { if let id = targetID { model.startCompose(.reply(messageID: id, all: false)) } } label: { Label("Responder ao remetente", systemImage: "arrowshape.turn.up.left") }
-                    .keyboardShortcut("r", modifiers: .command)
-                    .disabled(targetID == nil)
-                Button { if let id = targetID { model.startCompose(.forward(messageID: id)) } } label: { Label("Encaminhar", systemImage: "arrowshape.turn.up.right") }
-                    .disabled(targetID == nil)
+                Button { reply(all: true) } label: { Label("Responder", systemImage: "arrowshape.turn.up.left.2") }.disabled(targetID == nil)
+                Button { reply(all: false) } label: { Label("Responder ao remetente", systemImage: "arrowshape.turn.up.left") }
+                    .keyboardShortcut("r", modifiers: .command).disabled(targetID == nil)
+                Button { if let id = targetID { model.startCompose(.forward(messageID: id)) } } label: { Label("Encaminhar", systemImage: "arrowshape.turn.up.right") }.disabled(targetID == nil)
             }
-            ToolbarItem {
-                Button { Task { await model.refresh() } } label: { Label("Atualizar", systemImage: "arrow.clockwise") }
-                    .keyboardShortcut("r", modifiers: [.command, .shift])
-            }
-            ToolbarItem {
-                Button("Sair") { Task { await model.signOut() } }
+            ToolbarItemGroup {
+                Button { showPalette = true } label: { Label("Paleta de comandos", systemImage: "command") }.keyboardShortcut("k", modifiers: .command)
+                Button { Task { await model.refresh() } } label: { Label("Atualizar", systemImage: "arrow.clockwise") }.keyboardShortcut("r", modifiers: [.command, .shift])
             }
         }
+        .overlay(alignment: .bottom) { ToastView() }
         .onChange(of: selection) { _, id in
             guard let id, let message = model.messages.first(where: { $0.id == id }) else { return }
             Task { await model.open(message) }
         }
-        // Atalhos estilo Gmail (requisito). Teclas únicas valem quando a lista tem o foco.
-        .sheet(item: $pickingFolderFor) { id in
-            LocalFolderPicker { name in
-                pickingFolderFor = nil
-                act { await model.moveToLocalFolder($0, name) }
+        .sheet(item: Binding(get: { model.compose?.mode == .new ? model.compose : nil }, set: { if $0 == nil { model.compose = nil } })) { compose in
+            NavigationStack { ComposeEditor(model: compose, inline: false) }
+        }
+        .sheet(item: $pickingFolderFor) { _ in
+            LocalFolderPicker { name in pickingFolderFor = nil; act { await model.moveToLocalFolder($0, name) } }
+        }
+        .sheet(item: $snoozingFor) { _ in
+            SnoozePicker { date in snoozingFor = nil; act { await model.snooze($0, until: date) } }
+        }
+        .sheet(isPresented: $showPalette) { CommandPalette(commands: commands) }
+        .sheet(isPresented: $showHelp) { ShortcutsHelp() }
+        // Atalhos estilo Gmail (docs/04-ux.md). Teclas únicas valem fora de campos de texto.
+        .onKeyPress(characters: .init(charactersIn: "jkeu#/vrfchszo?O"), phases: .down) { press in
+            if model.compose != nil { return .ignored }
+            if model.conversationFocused {
+                switch press.characters {
+                case "j": model.moveFocus(1)
+                case "k": model.moveFocus(-1)
+                case "o": if let id = model.focusedNodeID { Task { await model.toggle(id) } }
+                case "O": Task { await model.expandAll() }
+                default: return handleCommon(press.characters)
+                }
+                return .handled
             }
-        }
-        .sheet(item: Binding(get: { model.compose }, set: { if $0 == nil { model.compose = nil } })) { compose in
-            ComposeView(model: compose) { model.compose = nil }
-        }
-        .onKeyPress(characters: .init(charactersIn: "jkeu#/vrfc")) { press in
             switch press.characters {
             case "j": moveSelection(by: 1)
             case "k": moveSelection(by: -1)
-            case "e": act { await model.move($0, to: .archive) }
-            case "#": act { await model.move($0, to: .deleteditems) }
-            case "u": act { id in
-                let isRead = model.messages.first { $0.id == id }?.isRead ?? true
-                await model.setRead(id, !isRead)
-            }
-            case "/": searchFocused = true
-            case "v": if selection != nil { pickingFolderFor = selection }
-            case "r": if let id = targetID { model.startCompose(.reply(messageID: id, all: true)) }
-            case "f": if let id = targetID { model.startCompose(.forward(messageID: id)) }
-            case "c": model.startCompose(.new)
-            default: return .ignored
+            case "o": if let id = model.openMessage?.id { Task { await model.toggle(id) } }
+            default: return handleCommon(press.characters)
             }
             return .handled
         }
+        .onKeyPress(.return) {
+            guard model.compose == nil, model.openMessage != nil, !model.conversationFocused else { return .ignored }
+            model.conversationFocused = true
+            return .handled
+        }
+        .onKeyPress(.escape) {
+            if model.compose != nil { return .ignored }
+            if model.conversationFocused { model.conversationFocused = false; return .handled }
+            if !model.searchText.isEmpty { model.searchText = ""; return .handled }
+            return .ignored
+        }
     }
 
-    /// Mensagem alvo das ações: a aberta, senão a selecionada.
-    private var targetID: String? { model.openMessage?.id ?? selection }
+    private func handleCommon(_ key: String) -> KeyPress.Result {
+        switch key {
+        case "e": act { await model.move($0, to: .archive) }
+        case "#": act { await model.move($0, to: .deleteditems) }
+        case "u": act { id in
+            let isRead = model.messages.first { $0.id == id }?.isRead ?? true
+            await model.setRead(id, !isRead)
+        }
+        case "s": if let id = targetID { Task { await model.toggleFlag(id) } }
+        case "/": searchFocused = true
+        case "v": if targetID != nil { pickingFolderFor = targetID }
+        case "h": if targetID != nil { snoozingFor = targetID }
+        case "r": reply(all: true)
+        case "f": if let id = targetID { model.startCompose(.forward(messageID: id)) }
+        case "c": model.startCompose(.new)
+        case "z": Task { await model.undo() }
+        case "?": showHelp = true
+        default: return .ignored
+        }
+        return .handled
+    }
+
+    private func reply(all: Bool) {
+        if let id = targetID { model.startCompose(.reply(messageID: id, all: all)) }
+    }
+
+    /// Mensagem alvo das ações: a focada na Conversa, senão a aberta, senão a selecionada.
+    private var targetID: String? {
+        (model.conversationFocused ? model.focusedNodeID : nil) ?? model.openMessage?.id ?? selection
+    }
 
     private var title: String {
         switch model.selection {
         case .account(let known): FolderList.label(known)
         case .local(let name): name
+        case .snoozed: "Adiadas"
+        case .awaitingMe: "Sem resposta sua"
+        case .awaitingThem: "Sem resposta deles"
         case nil: "MasterMail"
         }
     }
@@ -98,18 +141,75 @@ struct MailboxView: View {
         let ids = model.messages.map(\.id)
         guard !ids.isEmpty else { return }
         let current = selection.flatMap { ids.firstIndex(of: $0) } ?? -1
-        let next = min(max(current + delta, 0), ids.count - 1)
-        selection = ids[next]
+        selection = ids[min(max(current + delta, 0), ids.count - 1)]
     }
 
+    /// Executa a ação sobre o alvo e avança para o próximo item (UX: Caixa de entrada é fila).
     private func act(_ action: @escaping (String) async -> Void) {
-        guard let id = selection else { return }
+        guard let id = targetID else { return }
         let ids = model.messages.map(\.id)
         let index = ids.firstIndex(of: id) ?? 0
         Task {
             await action(id)
             let remaining = model.messages.map(\.id)
+            if remaining.contains(id) { return }
             selection = remaining.isEmpty ? nil : remaining[min(index, remaining.count - 1)]
+            model.conversationFocused = false
+        }
+    }
+
+    private var commands: [PaletteCommand] {
+        [
+            .init("Responder (a todos)", "r") { reply(all: true) },
+            .init("Responder ao remetente", "⌘R") { reply(all: false) },
+            .init("Encaminhar", "f") { if let id = targetID { model.startCompose(.forward(messageID: id)) } },
+            .init("Nova mensagem", "c") { model.startCompose(.new) },
+            .init("Arquivar", "e") { act { await model.move($0, to: .archive) } },
+            .init("Apagar", "#") { act { await model.move($0, to: .deleteditems) } },
+            .init("Mover para pasta local", "v") { pickingFolderFor = targetID },
+            .init("Adiar", "h") { snoozingFor = targetID },
+            .init("Sinalizar", "s") { if let id = targetID { Task { await model.toggleFlag(id) } } },
+            .init("Marcar lida / não lida", "u") { _ = handleCommon("u") },
+            .init("Desfazer", "z") { Task { await model.undo() } },
+            .init("Buscar", "/") { searchFocused = true },
+            .init("Atualizar", "⌘⇧R") { Task { await model.refresh() } },
+            .init("Calendário", "⌘2") { model.view = .calendar },
+            .init("Pessoas", "⌘3") { model.view = .people },
+            .init("Atalhos", "?") { showHelp = true },
+        ]
+    }
+}
+
+/// Mail / Calendário / Pessoas (⌘1 ⌘2 ⌘3).
+struct ViewPicker: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        @Bindable var model = model
+        Picker("Visão", selection: $model.view) {
+            Image(systemName: "envelope").tag(AppModel.AppView.mail)
+            Image(systemName: "calendar").tag(AppModel.AppView.calendar)
+            Image(systemName: "person.2").tag(AppModel.AppView.people)
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+    }
+}
+
+/// Toast discreto no rodapé: "Arquivada · desfazer (z)".
+struct ToastView: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        if let toast = model.toast {
+            Text(toast)
+                .font(.callout)
+                .padding(.horizontal, 14).padding(.vertical, 8)
+                .background(.regularMaterial, in: Capsule())
+                .shadow(radius: 4)
+                .padding(.bottom, 12)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .onTapGesture { Task { await model.undo() } }
         }
     }
 }
@@ -158,13 +258,16 @@ struct FolderList: View {
                     .tag(AppModel.SidebarItem.account(known))
                 }
             }
+            Section("Acompanhamento") {
+                Label("Sem resposta sua", systemImage: "arrowshape.turn.up.left.circle").tag(AppModel.SidebarItem.awaitingMe)
+                Label("Sem resposta deles", systemImage: "clock.arrow.circlepath").tag(AppModel.SidebarItem.awaitingThem)
+                Label("Adiadas", systemImage: "zzz").tag(AppModel.SidebarItem.snoozed)
+            }
             Section {
                 ForEach(model.localFolders, id: \.self) { name in
                     Label(name, systemImage: "folder")
                         .tag(AppModel.SidebarItem.local(name))
-                        .contextMenu {
-                            Button("Renomear…") { renameTo = name; renaming = name }
-                        }
+                        .contextMenu { Button("Renomear…") { renameTo = name; renaming = name } }
                 }
                 if creating {
                     TextField("Nome da pasta", text: $newFolderName)
@@ -212,14 +315,11 @@ struct LocalFolderPicker: View {
     var body: some View {
         VStack(spacing: 8) {
             TextField("Mover para a pasta local…", text: $query)
-                .textFieldStyle(.roundedBorder)
-                .focused($focused)
+                .textFieldStyle(.roundedBorder).focused($focused)
                 .onSubmit { onPick(matches.first ?? query.trimmingCharacters(in: .whitespaces)) }
                 .onExitCommand { dismiss() }
             List {
-                ForEach(matches, id: \.self) { name in
-                    Button(name) { onPick(name) }.buttonStyle(.plain)
-                }
+                ForEach(matches, id: \.self) { name in Button(name) { onPick(name) }.buttonStyle(.plain) }
                 if !query.trimmingCharacters(in: .whitespaces).isEmpty, !matches.contains(query.trimmingCharacters(in: .whitespaces)) {
                     Button("Criar \"\(query.trimmingCharacters(in: .whitespaces))\"") { onPick(query.trimmingCharacters(in: .whitespaces)) }.buttonStyle(.plain)
                 }
@@ -227,29 +327,51 @@ struct LocalFolderPicker: View {
             }
             .frame(minHeight: 160)
         }
-        .padding()
-        .frame(width: 360)
+        .padding().frame(width: 360)
         .onAppear { focused = true }
     }
 }
 
-/// Mail / Calendário / Pessoas (⌘1 ⌘2 ⌘3).
-struct ViewPicker: View {
-    @Environment(AppModel.self) private var model
+/// Adiar (`h`): opções fixas + data livre.
+struct SnoozePicker: View {
+    @Environment(\.dismiss) private var dismiss
+    let onPick: (Date) -> Void
+    @State private var custom = Calendar.current.date(byAdding: .day, value: 1, to: Date())!
+
+    private var options: [(String, Date)] {
+        let cal = Calendar.current
+        let now = Date()
+        func at(_ date: Date, hour: Int) -> Date { cal.date(bySettingHour: hour, minute: 0, second: 0, of: date)! }
+        let tomorrow = cal.date(byAdding: .day, value: 1, to: now)!
+        var monday = now
+        repeat { monday = cal.date(byAdding: .day, value: 1, to: monday)! } while cal.component(.weekday, from: monday) != 2
+        return [
+            ("Daqui a 3 horas", now.addingTimeInterval(3 * 3600)),
+            ("Hoje à tarde, 14h", at(now, hour: 14)),
+            ("Amanhã, 9h", at(tomorrow, hour: 9)),
+            ("Segunda-feira, 9h", at(monday, hour: 9)),
+        ].filter { $0.1 > now }
+    }
 
     var body: some View {
-        @Bindable var model = model
-        Picker("Visão", selection: $model.view) {
-            Image(systemName: "envelope").tag(AppModel.AppView.mail)
-            Image(systemName: "calendar").tag(AppModel.AppView.calendar)
-            Image(systemName: "person.2").tag(AppModel.AppView.people)
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Adiar até").font(.headline)
+            ForEach(options, id: \.0) { label, date in
+                Button(label) { onPick(date) }.buttonStyle(.plain)
+            }
+            Divider()
+            DatePicker("Outra data", selection: $custom)
+            HStack {
+                Spacer()
+                Button("Cancelar") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Adiar") { onPick(custom) }.keyboardShortcut(.defaultAction)
+            }
         }
-        .pickerStyle(.segmented)
-        .labelsHidden()
+        .padding().frame(width: 320)
     }
 }
 
-/// Próximos eventos de hoje, no topo da Lista (UX: não trocar de visão para ver a agenda).
+/// Próximos eventos de hoje, no topo da Lista.
 struct TodayStrip: View {
     @Environment(AppModel.self) private var model
 
@@ -292,6 +414,7 @@ struct MessageList: View {
                         }
                     }
                     Button("Arquivar") { Task { await model.move(message.id, to: .archive) } }
+                    Button(message.isFlagged ? "Tirar sinalizador" : "Sinalizar") { Task { await model.toggleFlag(message.id) } }
                     Button("Apagar", role: .destructive) { Task { await model.move(message.id, to: .deleteditems) } }
                 }
         }
@@ -300,10 +423,10 @@ struct MessageList: View {
             if model.messages.isEmpty {
                 if !model.searchText.isEmpty {
                     ContentUnavailableView.search(text: model.searchText)
-                } else if model.isSyncing {
+                } else if model.isSyncing, model.selection == .account(.inbox) {
                     ContentUnavailableView("Indexando", systemImage: "arrow.triangle.2.circlepath", description: Text(model.syncStatus))
                 } else {
-                    ContentUnavailableView("Pasta vazia", systemImage: "tray")
+                    ContentUnavailableView("Nada aqui", systemImage: "tray")
                 }
             }
         }
@@ -317,18 +440,19 @@ struct MessageRow: View {
         VStack(alignment: .leading, spacing: 3) {
             HStack {
                 Text(message.fromName.isEmpty ? message.fromAddress : message.fromName)
-                    .fontWeight(message.isRead ? .regular : .bold)
-                    .lineLimit(1)
+                    .fontWeight(message.isRead ? .regular : .bold).lineLimit(1)
                 Spacer()
+                if message.isFlagged { Image(systemName: "flag.fill").font(.caption).foregroundStyle(.orange) }
                 if message.hasAttachments { Image(systemName: "paperclip").font(.caption).foregroundStyle(.secondary) }
-                Text(message.receivedAt, format: .relative(presentation: .named))
-                    .font(.caption).foregroundStyle(.secondary)
+                if let until = message.snoozedUntil, until > Date() {
+                    Text(until, format: .dateTime.weekday(.abbreviated).hour().minute()).font(.caption).foregroundStyle(.purple)
+                } else {
+                    Text(message.receivedAt, format: .relative(presentation: .named)).font(.caption).foregroundStyle(.secondary)
+                }
             }
             Text(message.subject.isEmpty ? "(sem assunto)" : message.subject)
-                .lineLimit(1)
-                .fontWeight(message.isRead ? .regular : .semibold)
-            Text(message.preview)
-                .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                .lineLimit(1).fontWeight(message.isRead ? .regular : .semibold)
+            Text(message.preview).font(.caption).foregroundStyle(.secondary).lineLimit(2)
             if !message.categories.isEmpty { CategoryChips(categories: message.categories) }
         }
         .padding(.vertical, 2)
@@ -346,8 +470,7 @@ struct CategoryChips: View {
                     .font(.caption2.weight(.medium))
                     .padding(.horizontal, 6).padding(.vertical, 2)
                     .background(Self.color(for: name).opacity(0.18), in: Capsule())
-                    .foregroundStyle(Self.color(for: name))
-                    .lineLimit(1)
+                    .foregroundStyle(Self.color(for: name)).lineLimit(1)
             }
         }
     }

@@ -1,7 +1,7 @@
 import MasterMailCore
 import SwiftUI
 
-/// A Conversa: mensagens em ordem cronológica, cada uma dizendo a quem responde; Ramos marcados e recuados.
+/// A Conversa: cronológica, "em resposta a", Ramos recuados, mais recente aberta, resposta inline no fim.
 struct ConversationView: View {
     @Environment(AppModel.self) private var model
 
@@ -10,18 +10,30 @@ struct ConversationView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
                     Text(model.openMessage?.subject.isEmpty == false ? model.openMessage!.subject : "(sem assunto)")
-                        .font(.title2.bold())
-                        .padding(.bottom, 4)
+                        .font(.title2.bold()).padding(.bottom, 4)
                     ForEach(model.conversation) { node in
-                        MessageCard(node: node, parent: parent(of: node), isExpanded: model.expanded.contains(node.id), isNewest: node.id == model.conversation.last?.id)
+                        MessageCard(node: node, parent: parent(of: node),
+                                    isExpanded: model.expanded.contains(node.id),
+                                    isNewest: node.id == model.conversation.last?.id,
+                                    isFocused: model.conversationFocused && model.focusedNodeID == node.id)
                             .padding(.leading, CGFloat(min(node.depth, 4)) * 16)
                             .id(node.id)
+                    }
+                    if let compose = model.compose, compose.mode != .new {
+                        ComposeEditor(model: compose, inline: true)
+                            .id("compose")
                     }
                 }
                 .padding()
             }
-            .onChange(of: model.openMessage?.id) { _, id in
-                if let id { withAnimation { proxy.scrollTo(id, anchor: .top) } }
+            .onChange(of: model.openMessage?.id) { _, _ in
+                if let last = model.conversation.last?.id { withAnimation { proxy.scrollTo(last, anchor: .top) } }
+            }
+            .onChange(of: model.focusedNodeID) { _, id in
+                if let id, model.conversationFocused { withAnimation { proxy.scrollTo(id, anchor: .center) } }
+            }
+            .onChange(of: model.compose?.id) { _, id in
+                if id != nil { withAnimation { proxy.scrollTo("compose", anchor: .bottom) } }
             }
         }
     }
@@ -37,6 +49,7 @@ struct MessageCard: View {
     let parent: ConversationNode?
     let isExpanded: Bool
     let isNewest: Bool
+    let isFocused: Bool
     @State private var bodyHeight: CGFloat = 200
 
     private var m: StoredMessage { node.message }
@@ -49,14 +62,9 @@ struct MessageCard: View {
                         Text(m.fromName.isEmpty ? m.fromAddress : m.fromName).fontWeight(.semibold)
                         Text(m.fromAddress).foregroundStyle(.secondary).font(.caption)
                         Spacer()
-                        if node.isBranch {
-                            Text("Ramo").font(.caption2.bold()).padding(.horizontal, 6).padding(.vertical, 2)
-                                .background(.orange.opacity(0.2), in: Capsule()).foregroundStyle(.orange)
-                        }
-                        if isNewest {
-                            Text("Mais recente").font(.caption2.bold()).padding(.horizontal, 6).padding(.vertical, 2)
-                                .background(.blue.opacity(0.15), in: Capsule()).foregroundStyle(.blue)
-                        }
+                        if node.isBranch { Badge("Ramo", .orange) }
+                        if isNewest { Badge("Mais recente", .blue) }
+                        if m.isFlagged { Image(systemName: "flag.fill").foregroundStyle(.orange).font(.caption) }
                         Text(m.receivedAt, format: .dateTime.day().month().hour().minute()).font(.caption).foregroundStyle(.secondary)
                     }
                     if !m.categories.isEmpty { CategoryChips(categories: m.categories) }
@@ -77,8 +85,7 @@ struct MessageCard: View {
                 }
                 let allowRemote = model.remoteImagesAllowed.contains(m.id)
                 if let html = m.bodyHTML, !allowRemote, html.contains("http") {
-                    Button("Mostrar imagens remotas") { model.remoteImagesAllowed.insert(m.id) }
-                        .controlSize(.small)
+                    Button("Mostrar imagens remotas") { model.remoteImagesAllowed.insert(m.id) }.controlSize(.small)
                 }
                 MessageBodyView(html: m.bodyHTML, text: m.bodyText, allowRemote: allowRemote, height: $bodyHeight)
                     .frame(height: bodyHeight)
@@ -87,6 +94,17 @@ struct MessageCard: View {
         }
         .padding(12)
         .background(isNewest ? Color.accentColor.opacity(0.06) : Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(node.isBranch ? Color.orange.opacity(0.5) : Color.gray.opacity(0.2)))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(isFocused ? Color.accentColor : (node.isBranch ? Color.orange.opacity(0.5) : Color.gray.opacity(0.2)), lineWidth: isFocused ? 2 : 1))
+    }
+}
+
+struct Badge: View {
+    let text: String
+    let color: Color
+    init(_ text: String, _ color: Color) { self.text = text; self.color = color }
+
+    var body: some View {
+        Text(text).font(.caption2.bold()).padding(.horizontal, 6).padding(.vertical, 2)
+            .background(color.opacity(0.18), in: Capsule()).foregroundStyle(color)
     }
 }

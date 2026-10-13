@@ -76,8 +76,12 @@ public struct Message: Codable, Sendable, Hashable, Identifiable {
     public var conversationId: String?
     public var conversationIndex: String?
     public var categories: [String]?
+    public var flag: Flag?
     public var body: ItemBody?
     public var singleValueExtendedProperties: [ExtendedProperty]?
+
+    public struct Flag: Codable, Sendable, Hashable { public var flagStatus: String? }
+    public var isFlagged: Bool { flag?.flagStatus == "flagged" }
 
     /// Pasta local gravada na mensagem (ADR 0006), ou nil.
     public var localFolder: String? {
@@ -87,7 +91,7 @@ public struct Message: Codable, Sendable, Hashable, Identifiable {
 
     public static let listFields = [
         "id", "subject", "from", "toRecipients", "ccRecipients", "receivedDateTime",
-        "bodyPreview", "isRead", "hasAttachments", "conversationId", "conversationIndex", "categories",
+        "bodyPreview", "isRead", "hasAttachments", "conversationId", "conversationIndex", "categories", "flag",
     ].joined(separator: ",")
 }
 

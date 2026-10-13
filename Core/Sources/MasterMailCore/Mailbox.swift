@@ -79,8 +79,18 @@ public extension GraphClient {
         try await self.patch("me/messages/\(id)", json: JSONEncoder().encode(patch))
     }
 
-    /// Move para uma pasta do servidor (arquivar = archive, apagar = deleteditems).
-    func move(id: String, to destination: WellKnownFolder) async throws {
-        try await post("me/messages/\(id)/move", json: Data(#"{"destinationId": "\#(destination.rawValue)"}"#.utf8))
+    func setFlag(id: String, _ flagged: Bool) async throws {
+        try await patch("me/messages/\(id)", json: Data(#"{"flag": {"flagStatus": "\#(flagged ? "flagged" : "notFlagged")"}}"#.utf8))
+    }
+
+    /// Move para uma pasta do servidor (arquivar = archive, apagar = deleteditems). Devolve a cópia nova: o id muda ao mover.
+    @discardableResult
+    func move(id: String, to destination: WellKnownFolder) async throws -> Message {
+        try await move(id: id, destinationID: destination.rawValue)
+    }
+
+    @discardableResult
+    func move(id: String, destinationID: String) async throws -> Message {
+        try await postDecoding("me/messages/\(id)/move", json: Data(#"{"destinationId": "\#(destinationID)"}"#.utf8))
     }
 }

@@ -57,7 +57,7 @@ public enum RichText {
     }
 }
 
-extension String {
+public extension String {
     var htmlEscaped: String {
         replacingOccurrences(of: "&", with: "&amp;")
             .replacingOccurrences(of: "<", with: "&lt;")
