@@ -7,11 +7,12 @@ public enum RichText {
     @discardableResult
     public static func applyMarkdownShortcuts(_ text: inout AttributedString) -> Bool {
         let plain = String(text.characters)
+        // Só dispara quando o usuário acabou de digitar espaço ou Enter: nada de converter no meio da palavra.
+        guard let last = plain.last, last.isWhitespace else { return false }
         // Sem lookbehind no Regex do Swift: captura o vizinho e usa só o miolo (output.2).
         let patterns: [(Regex<(Substring, Substring, Substring)>, Int, InlinePresentationIntent)] = [
             (/(^|[^*])\*\*([^*\n]+?)\*\*/, 2, .stronglyEmphasized),
             (/(^|[^\w*])\*([^*\n]+?)\*/, 1, .emphasized),
-            (/(^|[^\w])_([^_\n]+?)_/, 1, .emphasized),
             (/(^|[^`])`([^`\n]+?)`/, 1, .code),
         ]
         for (regex, marker, intent) in patterns {
@@ -32,7 +33,7 @@ public enum RichText {
             return true
         }
         // "- " no começo da linha vira marcador de lista.
-        if let match = plain.firstMatch(of: /(?m)^- (?=\S)/) {
+        if let match = plain.firstMatch(of: /(?m)^- /) {
             let start = text.index(text.startIndex, offsetByCharacters: plain.distance(from: plain.startIndex, to: match.range.lowerBound))
             let end = text.index(start, offsetByCharacters: 2)
             text.replaceSubrange(start..<end, with: AttributedString("• "))

@@ -133,6 +133,7 @@ final class AppModel {
             reloadLocalFolders()
             await folderChanged()
             startPolling()
+            Task { await reconcileLocalFolders() }
             startBackfill()
         } catch {
             errorMessage = error.localizedDescription
@@ -162,6 +163,19 @@ final class AppModel {
 
     private func reloadLocalFolders() {
         localFolders = (try? store.localFolders()) ?? []
+    }
+
+    /// O servidor é a fonte da verdade da Pasta local (ADR 0006): outro Mac pode ter movido mensagens.
+    private func reconcileLocalFolders() async {
+        guard let graph else { return }
+        do {
+            let assignments = try await graph.localFolderAssignments()
+            try store.applyLocalFolders(assignments)
+            reloadLocalFolders()
+            await reloadList()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     func createLocalFolder(_ name: String) {

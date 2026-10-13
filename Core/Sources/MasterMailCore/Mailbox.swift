@@ -54,6 +54,25 @@ public extension GraphClient {
         try await patch("me/messages/\(id)", json: Data(#"{"isRead": \#(isRead)}"#.utf8))
     }
 
+    /// Todas as mensagens que têm Pasta local gravada no servidor (ADR 0006): [id: nome]. Reconcilia o índice no login.
+    func localFolderAssignments() async throws -> [String: String] {
+        var result: [String: String] = [:]
+        var components = URLComponents(url: Self.baseURL.appendingPathComponent("me/messages"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [
+            .init(name: "$top", value: "500"),
+            .init(name: "$select", value: "id"),
+            .init(name: "$filter", value: "singleValueExtendedProperties/any(ep:ep/id eq '\(ExtendedProperty.localFolderID)' and ep/value ne null)"),
+            .init(name: "$expand", value: ExtendedProperty.expand),
+        ]
+        var url: URL? = components.url
+        while let next = url {
+            let page: GraphPage<Message> = try await get(url: next)
+            for m in page.value { if let name = m.localFolder { result[m.id] = name } }
+            url = page.nextLink
+        }
+        return result
+    }
+
     /// Grava (ou limpa, com nil) a Pasta local na própria mensagem (ADR 0006).
     func setLocalFolder(id: String, _ name: String?) async throws {
         let patch = ["singleValueExtendedProperties": [ExtendedProperty(id: ExtendedProperty.localFolderID, value: name ?? "")]]

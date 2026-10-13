@@ -108,11 +108,13 @@ struct ComposeView: View {
     @Bindable var model: ComposeModel
     let onClose: () -> Void
     @State private var confirmRemoved = false
+    private enum Field { case to, body }
+    @FocusState private var focus: Field?
 
     var body: some View {
         VStack(spacing: 0) {
             Form {
-                TextField("Para", text: $model.to)
+                TextField("Para", text: $model.to).focused($focus, equals: .to)
                 TextField("Cc", text: $model.cc)
                 TextField("Assunto", text: $model.subject)
             }
@@ -122,6 +124,7 @@ struct ComposeView: View {
             .padding(.top, 8)
             Divider().padding(.vertical, 6)
             TextEditor(text: $model.body)
+                .focused($focus, equals: .body)
                 .font(.body)
                 .padding(.horizontal, 8)
                 .onChange(of: model.body) { _, _ in model.applyShortcuts() }
@@ -153,6 +156,8 @@ struct ComposeView: View {
             Text("Não vão receber: " + model.removedParticipants.joined(separator: ", "))
         }
         .onChange(of: model.isSent) { _, sent in if sent { onClose() } }
+        // Responder e encaminhar começam no texto; mensagem nova começa no "Para".
+        .onChange(of: model.isBusy) { _, busy in if !busy { focus = model.mode == .new ? .to : .body } }
     }
 
     private func trySend() {

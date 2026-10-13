@@ -41,10 +41,8 @@ public struct MailSync: Sendable {
 
     static func initialDeltaURL(folder: String) -> URL {
         var components = URLComponents(url: GraphClient.baseURL.appendingPathComponent("me/mailFolders/\(folder)/messages/delta"), resolvingAgainstBaseURL: false)!
-        components.queryItems = [
-            .init(name: "$select", value: Message.listFields + ",body"),
-            .init(name: "$expand", value: ExtendedProperty.expand),
-        ]
+        // O delta não aceita $expand (HTTP 400); a Pasta local é reconciliada à parte (localFolderAssignments).
+        components.queryItems = [.init(name: "$select", value: Message.listFields + ",body")]
         return components.url!
     }
 }

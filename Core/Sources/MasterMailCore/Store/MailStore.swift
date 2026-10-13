@@ -213,6 +213,16 @@ public final class MailStore: Sendable {
         }
     }
 
+    /// Aplica o que o servidor diz: mensagens listadas ganham a pasta; as demais com pasta local perdem.
+    public func applyLocalFolders(_ assignments: [String: String]) throws {
+        try pool.write { db in
+            try db.execute(sql: "UPDATE message SET localFolder = NULL WHERE localFolder IS NOT NULL")
+            for (id, name) in assignments {
+                try db.execute(sql: "UPDATE message SET localFolder = ? WHERE id = ?", arguments: [name, id])
+            }
+        }
+    }
+
     public func setLocalFolder(id: String, _ name: String?) throws {
         try pool.write { db in
             try db.execute(sql: "UPDATE message SET localFolder = ? WHERE id = ?", arguments: [name, id])
