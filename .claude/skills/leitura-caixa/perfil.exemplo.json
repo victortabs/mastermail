@@ -1,0 +1,63 @@
+{
+  "empresa_dominio": "exemplo.com.br",
+  "dono": {
+    "nome": "Fulano de Tal",
+    "enderecos": [
+      "fulano@exemplo.com.br"
+    ],
+    "chamado_de": [
+      "fulano"
+    ],
+    "papel": "Sócio-diretor de uma construtora. Conduz concorrências com clientes-chave, aprova projetos, assina contratos. A equipe toca execução e financeiro e o copia em quase tudo."
+  },
+  "equipe": [
+    {
+      "email": "ana@exemplo.com.br",
+      "nome": "Ana",
+      "papel": "contratos e seguros"
+    },
+    {
+      "email": "bruno@exemplo.com.br",
+      "nome": "Bruno",
+      "papel": "engenheiro coordenador de obras"
+    }
+  ],
+  "parceiros": {
+    "advogados.com.br": "escritório jurídico"
+  },
+  "clientes": {
+    "clientea.com": "Cliente A"
+  },
+  "obras": [
+    {
+      "chave": "Cliente A Shopping Centro",
+      "cliente": "Cliente A",
+      "status": "execução",
+      "apelidos": [
+        "shopping centro",
+        "loja 101"
+      ]
+    }
+  ],
+  "regras": [
+    {
+      "dominio": "exemplo.com.br",
+      "assunto": "nf para pagamento|solicita[cç][aã]o de pagamento",
+      "tipo": "financeiro",
+      "etapa": "pagamento",
+      "acao": "nenhuma",
+      "quem": "equipe",
+      "nota": "fluxo interno de pagamento"
+    },
+    {
+      "dominio": "substack.com",
+      "tipo": "newsletter"
+    }
+  ],
+  "sempre_modelo": [
+    "docusign.net",
+    "clicksign.com",
+    "d4sign.com.br",
+    "advogados.com.br"
+  ]
+}

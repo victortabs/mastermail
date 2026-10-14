@@ -1,7 +1,7 @@
 # 0006 — Pasta local gravada na própria mensagem no servidor
 
 - **Data:** 2026-10-13
-- **Status:** aceita
+- **Status:** aceita; a regra "uma Pasta local por mensagem" foi substituída pela [0010](0010-pastas-como-visoes.md). O mecanismo (propriedade na mensagem) continua.
 
 ## Contexto
 O usuário quer organizar mensagens em pastas dentro do MasterMail sem mexer nas pastas do Outlook (no celular tudo deve continuar na Caixa de Entrada). Mas quer que a organização apareça igual em outro Mac e sobreviva a uma reinstalação.

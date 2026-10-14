@@ -22,13 +22,17 @@
 ## Mensagens e conversas
 | Requisito | Prioridade | Notas |
 |---|---|---|
-| Caixa de entrada = mensagens não tratadas (sem Pasta local, não arquivadas, não Ruído) | Must | **✅** |
+| Caixa de entrada = tudo que não é Ruído e ainda não foi aberto; ao abrir, fica só nas Pastas locais. Nada sai antes de o usuário ver | Must | ADR 0010. **⬜** (hoje: sem Pasta local) |
+| Todas: tudo que não é Ruído, aberto ou não | Must | ADR 0010. **⬜** |
 | Conversa cronológica com Ramos explícitos e "em resposta a" | Must | Agrupar por `conversationIndex`; cabeçalhos como fallback. **✅** |
 | `R` = Responder (a todos); `⌘R` = Responder ao remetente; aviso ao remover participante | Must | **✅** |
 | Encaminhar, inclusive como anexo | Must | **✅** |
 | Lido/não lido, sinalizador, lixo eletrônico, apagar, arquivar (servidor) | Must | Arquivar nunca é automático. **✅** |
 | Pastas do servidor: só leitura. Nunca mover nem criar. | Must | **✅** |
-| Pasta local: uma por mensagem, gravada na mensagem no servidor | Must | ADR 0006. Mensagem lida com Pasta local sai da Caixa de entrada. **✅** |
+| Pastas locais como visões: a mensagem aparece em todas cujo critério atende (Projeto, Cliente, Fase, Com você, Pasta manual) | Must | ADR 0010, **1º na ordem de construção**. Atributos gravados na mensagem (ADR 0006). **⬜** (hoje: uma por mensagem ✅) |
+| Projeto com Cliente e estado: Orçamento → Obra em andamento → encerrada, ou perdido; Orçamento ganho vira a Obra na mesma pasta | Must | ADR 0010. **⬜** |
+| Barra lateral: Caixa de entrada, Com você, Aguardando, Obras em andamento, Orçamentos (Pedidos, Em proposta, Resultado), Clientes ▸ Obras/Orçamentos, Pastas manuais, Todas, Triagem | Must | ADR 0010. A pasta da Obra aparece em dois lugares e é a mesma. **⬜** |
+| Para e Cc separados no Índice local; pessoas em cópia guardadas como Contatos | Must | **2º na ordem**. Hoje `recipients` mistura os dois. **⬜** |
 | Adiar (snooze): esconder da Caixa de entrada até data/hora, só local | Must | **✅** |
 | Lista "sem resposta sua" e "sem resposta deles há N dias", com lembrete que se cancela ao chegar resposta | Must | Mesma consulta ao Índice local. **✅ (listas; lembrete que se cancela: ⬜)** |
 | Anexos: anexar, pré-visualizar (Quick Look), baixar; buscar por nome do anexo | Must | **🟡 abrir/salvar/anexar até 3 MB; Quick Look e nome no índice: ⬜** |
@@ -71,7 +75,9 @@
 | Requisito | Prioridade | Notas |
 |---|---|---|
 | Tipo por mensagem (Pessoa, Newsletter, Notificação automática, Promoção, Financeiro, Convite) | Must | **✅** |
-| Categoria atribuída pela IA, gravada no servidor (visível no celular) | Must | **✅ (ao confirmar na Triagem)** |
+| Categoria atribuída pela IA, gravada no servidor (visível no celular) | Must | **✅ (ao confirmar na Triagem)** A Categoria passa a carregar a Etapa (ADR 0010): ⬜ |
+| Projeto, Etapa, Fase, Com você, Prazo por mensagem, em lote, com o Perfil | Must | [06-leitura-ia.md](06-leitura-ia.md); validado com Haiku (skill `leitura-caixa`). No app: **⬜** |
+| Contrato e assinatura nunca resolvidos por Regra; sempre à IA, com o corpo limpo de histórico citado | Must | **3º na ordem**. **⬜** |
 | Sugestão sempre com Justificativa; usuário aceita com uma tecla | Must | **✅** |
 | Explicação do usuário vira Regra (determinística, zero tokens) | Must | **✅** |
 | Regra promovida a automática por decisão do usuário | Must | **🟡** promoção e Tipo/Ruído implementados; execução de Pasta local e Categoria para novas mensagens: ⬜ |
@@ -88,7 +94,7 @@
 | Sensível ao Contexto (nada, mensagem, várias, Conversa, trecho) | Must | **✅** |
 | Achar mensagens em linguagem natural (sobre o Índice local) | Must | **✅** |
 | Executar ações (mover para Pasta local, Categoria) listando o que vai fazer e esperando "sim" | Must | **✅** |
-| Resumo de Conversa, sob demanda e guardado | Must | Longa → modelo em pedaços. **🟡 geração; armazenamento e invalidação: ⬜** |
+| Resumo de Conversa: automático a partir de 4 mensagens e incremental (Resumo anterior + mensagem nova); nas demais, sob demanda; guardado | Must | **4º na ordem**. **🟡 geração sob demanda; automático, armazenamento e invalidação: ⬜** |
 | Rascunhar resposta no editor, usando as respostas anteriores da mesma Conversa | Must | Nunca envia sozinha. **✅** |
 | Criar Lembrete a partir de mensagem | Must | **✅** |
 | Aprender estilo a partir dos Enviados (opt-in) | Should | **⬜** |
@@ -101,6 +107,7 @@
 | Contatos derivados das mensagens + contatos salvos na conta | Must | **✅** |
 | Organização por domínio, renomeável, fundível; domínios públicos excluídos | Must | **✅** |
 | Visão por Organização: Contatos e todas as mensagens | Must | **✅** |
+| Grupo do Projeto: quem costuma estar junto nas mensagens de um Projeto, por papel | Should | Reconhece o Projeto pelos copiados sem modelo; sugere destinatários. **⬜** |
 
 ## Calendário e tarefas
 | Requisito | Prioridade | Notas |

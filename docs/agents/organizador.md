@@ -46,3 +46,7 @@ O arquivo é uma **Sugestão** (CONTEXT.md): aparece na tela "Organizar a caixa"
 ## Privacidade
 
 Nunca commitar o perfil, o plano nem domínios de clientes no repositório: são dados do usuário. Ficam só em Application Support.
+
+## Leitura contínua
+
+A organização inicial (acima) olha domínios. A leitura do dia a dia, mensagem por mensagem, com Projeto, Etapa e "com você", está em [06-leitura-ia.md](../06-leitura-ia.md) e na skill `.claude/skills/leitura-caixa/`.
