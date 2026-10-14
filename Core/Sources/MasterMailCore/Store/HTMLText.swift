@@ -2,6 +2,20 @@ import Foundation
 
 /// Reduz HTML a texto puro para o Índice local. Não é um parser: basta para busca.
 public enum HTMLText {
+    /// Política aplicada antes de carregar a mensagem, sem depender de compilar uma lista assíncrona.
+    public static func document(_ html: String, allowRemoteImages: Bool = false) -> String {
+        let images = allowRemoteImages ? "data: cid: https: http:" : "data: cid:"
+        return """
+        <!doctype html><html><head><meta charset="utf-8">
+        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src \(images); style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'">
+        <style>body{font:14px -apple-system,sans-serif;color:CanvasText;background:transparent;margin:0}
+        @media (prefers-color-scheme: dark){body{color:#ddd}} img{max-width:100%}
+        details.mm-quote>summary{color:#888;cursor:pointer;font-size:12px;margin:8px 0;list-style:none}
+        details.mm-quote>summary::before{content:"";display:inline-block;width:24px;border-top:1px solid #aaa;margin-right:6px;vertical-align:middle}</style>
+        </head><body>\(html)</body></html>
+        """
+    }
+
     public static func plainText(from html: String) -> String {
         var s = html
         // Remove blocos que nunca são conteúdo.

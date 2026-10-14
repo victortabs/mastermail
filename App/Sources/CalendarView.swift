@@ -16,6 +16,7 @@ final class CalendarModel {
     private(set) var isLoading = false
     private(set) var macAccess = false
     var error: String?
+    private var loadGeneration = UUID()
 
     init(graph: GraphClient) { self.graph = graph }
 
@@ -36,19 +37,25 @@ final class CalendarModel {
     }
 
     func load() async {
-        isLoading = true
-        defer { isLoading = false }
-        if !macAccess { macAccess = await mac.requestAccess() }
+        let generation = UUID()
+        loadGeneration = generation
         let range = interval
+        isLoading = true
+        defer { if loadGeneration == generation { isLoading = false } }
+        if !macAccess { macAccess = await mac.requestAccess() }
+        guard loadGeneration == generation else { return }
         do {
             async let ms = graph.events(from: range.start, to: range.end)
             let macEvents = macAccess ? mac.events(from: range.start, to: range.end) : []
             // Segunda barreira contra duplicata: mesmo título e mesmo início contam uma vez só (fica o da Microsoft).
             var seen = Set<String>()
-            events = (try await ms + macEvents).filter { seen.insert("\($0.title)|\(Int($0.start.timeIntervalSince1970))").inserted }.sorted { $0.start < $1.start }
+            let combined = try await ms + macEvents
+            guard loadGeneration == generation, !Task.isCancelled else { return }
+            error = nil
+            events = combined.filter { seen.insert("\($0.title)|\(Int($0.start.timeIntervalSince1970))").inserted }.sorted { $0.start < $1.start }
             await loadToday()
         } catch {
-            self.error = error.localizedDescription
+            if loadGeneration == generation, !Task.isCancelled { self.error = error.localizedDescription }
         }
     }
 
@@ -79,8 +86,9 @@ final class CalendarModel {
         do { try await graph.deleteEvent(id: event.id); await load() } catch { self.error = error.localizedDescription }
     }
 
-    func create(_ draft: EventDraft) async {
-        do { try await graph.createEvent(draft); await load() } catch { self.error = error.localizedDescription }
+    func create(_ draft: EventDraft) async -> Bool {
+        do { try await graph.createEvent(draft); await load(); return true }
+        catch { self.error = error.localizedDescription; return false }
     }
 
     func events(on day: Date, allDay: Bool) -> [CalendarEvent] {
@@ -290,6 +298,7 @@ struct EventEditor: View {
     @State private var location = ""
     @State private var attendees = ""
     @State private var notes = ""
+    @State private var isCreating = false
 
     init(cal: CalendarModel, defaultStart: Date, prefillTitle: String = "", prefillAttendees: String = "", prefillNotes: String = "") {
         self.cal = cal
@@ -316,7 +325,12 @@ struct EventEditor: View {
         }
         .formStyle(.grouped)
         .frame(width: 460)
+        .disabled(isCreating)
+        .interactiveDismissDisabled(isCreating)
         .navigationTitle("Novo evento na Agenda Microsoft")
+        .alert("Não foi possível criar o evento", isPresented: Binding(get: { cal.error != nil }, set: { if !$0 { cal.error = nil } })) {
+            Button("OK") { cal.error = nil }
+        } message: { Text(cal.error ?? "") }
         .toolbar {
             ToolbarItem(placement: .cancellationAction) { Button("Cancelar") { dismiss() } }
             ToolbarItem(placement: .confirmationAction) {
@@ -325,10 +339,14 @@ struct EventEditor: View {
                                            location: location.isEmpty ? nil : location,
                                            attendees: attendees.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty },
                                            notes: notes.isEmpty ? nil : notes)
-                    Task { await cal.create(draft); dismiss() }
+                    Task {
+                        isCreating = true
+                        defer { isCreating = false }
+                        if await cal.create(draft) { dismiss() }
+                    }
                 }
                 .keyboardShortcut(.return, modifiers: .command)
-                .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
+                .disabled(isCreating || title.trimmingCharacters(in: .whitespaces).isEmpty || end <= start)
             }
         }
     }

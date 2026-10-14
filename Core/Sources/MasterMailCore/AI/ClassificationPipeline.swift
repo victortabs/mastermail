@@ -27,9 +27,15 @@ public actor ClassificationPipeline {
     @discardableResult
     public func run(folder: String, max: Int = 50) async -> Int {
         var done = 0
+        lastError = nil
         do {
             // ponytail: sequencial, uma mensagem por vez; paralelizar se a nuvem ficar lenta (o local é serial de qualquer forma).
-            for m in try store.unclassified(in: folder, limit: max) where await classify(m) { done += 1 }
+            for m in try store.unclassified(in: folder, limit: max) {
+                if Task.isCancelled { break }
+                let current = settings.load()
+                if override == nil, !current.localEnabled, !current.cloudEnabled { break }
+                if await classify(m) { done += 1 }
+            }
         } catch {
             lastError = error.localizedDescription
         }

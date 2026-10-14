@@ -11,15 +11,29 @@ public extension GraphClient {
         try await get("me")
     }
 
-    /// Todas as pastas (raiz + um nível de subpastas), já com `depth`.
+    /// Todas as pastas, em qualquer profundidade, seguindo também a paginação do Graph.
     func folders() async throws -> [MailFolder] {
-        let top: GraphPage<MailFolder> = try await get("me/mailFolders", query: [.init(name: "$top", value: "200")])
+        func url(_ path: String) -> URL {
+            var c = URLComponents(url: Self.baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
+            c.queryItems = [.init(name: "$top", value: "200")]
+            return c.url!
+        }
+        var pending = [(url("me/mailFolders"), 0)]
+        var cursor = 0
+        var visited = Set<URL>()
+        var seen = Set<String>()
         var all: [MailFolder] = []
-        for folder in top.value {
-            all.append(folder)
-            if folder.childFolderCount > 0 {
-                let children: GraphPage<MailFolder> = try await get("me/mailFolders/\(folder.id)/childFolders", query: [.init(name: "$top", value: "200")])
-                all += children.value.map { var c = $0; c.depth = 1; return c }
+        while cursor < pending.count {
+            try Task.checkCancellation()
+            let (next, depth) = pending[cursor]
+            cursor += 1
+            guard visited.insert(next).inserted else { continue }
+            let page: GraphPage<MailFolder> = try await get(url: next)
+            if let nextLink = page.nextLink { pending.append((nextLink, depth)) }
+            for var folder in page.value where seen.insert(folder.id).inserted {
+                folder.depth = depth
+                all.append(folder)
+                if folder.childFolderCount > 0 { pending.append((url("me/mailFolders/\(folder.id)/childFolders"), depth + 1)) }
             }
         }
         return all

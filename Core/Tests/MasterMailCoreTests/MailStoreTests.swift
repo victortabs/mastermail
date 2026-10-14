@@ -131,11 +131,11 @@ struct PhishingTests {
 }
 
 struct ActionQueueTests {
-    @Test func queuePersistsAndRoundTrips() async {
+    @Test func queuePersistsAndRoundTrips() async throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("q-\(UUID().uuidString).json")
         let q = ActionQueue(fileURL: url)
-        await q.enqueue(.markRead(id: "a", isRead: true))
-        await q.enqueue(.localFolder(id: "b", name: "Obras"))
+        try await q.enqueue(.markRead(id: "a", isRead: true))
+        try await q.enqueue(.localFolder(id: "b", name: "Obras"))
         #expect(await q.count == 2)
         let reloaded = ActionQueue(fileURL: url)
         #expect(await reloaded.count == 2)

@@ -49,4 +49,20 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.victortabs.mastermail
         SWIFT_STRICT_CONCURRENCY: complete
     scheme:
-      testTargets: []
+      testTargets:
+        - MasterMailTests
+  MasterMailTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - App/Tests
+      - path: App/Sources
+        excludes:
+          - MasterMailApp.swift
+      - Core/Tests/MasterMailCoreTests/HTTPFixture.swift
+    dependencies:
+      - package: MasterMailCore
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_STRICT_CONCURRENCY: complete

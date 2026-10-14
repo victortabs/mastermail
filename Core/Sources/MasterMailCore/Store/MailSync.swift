@@ -5,10 +5,12 @@ import Foundation
 public struct MailSync: Sendable {
     public let graph: GraphClient
     public let store: MailStore
+    public let queue: ActionQueue?
 
-    public init(graph: GraphClient, store: MailStore) {
+    public init(graph: GraphClient, store: MailStore, queue: ActionQueue? = nil) {
         self.graph = graph
         self.store = store
+        self.queue = queue
     }
 
     /// Cabeçalhos: páginas maiores e corpo em HTML (o texto puro é derivado localmente).
@@ -19,11 +21,12 @@ public struct MailSync: Sendable {
         var url = try store.deltaLink(for: folder) ?? Self.initialDeltaURL(folder: folder)
         var total = 0
         while true {
+            try Task.checkCancellation()
             let page: DeltaPage<DeltaMessage> = try await graph.get(url: url, headers: Self.headers)
             let removed = page.value.filter(\.removed).map(\.id)
             let changed = page.value.compactMap(\.message).map { StoredMessage(message: $0, folder: folder) }
             if !removed.isEmpty { try store.delete(ids: removed) }
-            if !changed.isEmpty { try store.upsert(changed) }
+            if !changed.isEmpty { try store.upsert(changed, preserving: await queue?.pendingActions ?? []) }
             total += page.value.count
             progress?(total)
             if let next = page.nextLink {

@@ -16,7 +16,14 @@ open build/DerivedData/Build/Products/Debug/MasterMail.app
 ```
 Se o `xcode-select` apontar para o Command Line Tools, prefixe os comandos com `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`.
 
-Testes do núcleo: `cd Core && swift test`.
+Testes do núcleo: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --package-path Core`.
+
+Testes de coordenação do app (servidor simulado, sem abrir a conta real):
+```
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project MasterMail.xcodeproj -scheme MasterMail -configuration Debug -derivedDataPath build/DerivedData -destination 'platform=macOS,arch=arm64' test
+```
+
+Se aparecer erro de macro `TestingMacros` com o Command Line Tools, use o `DEVELOPER_DIR` acima. O projeto usa as macros e frameworks do Xcode completo.
 
 Primeiro login: precisa do Client ID do Entra, ver [03-entra.md](03-entra.md).
 

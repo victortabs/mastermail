@@ -29,6 +29,10 @@ final class ComposeModel: Identifiable {
     private var pendingClosers: [Character] = []
     private(set) var isBusy = true
     var error: String?
+    private var autosaveTask: Task<Void, Never>?
+    private var saveOperation: Task<Void, Error>?
+    private(set) var isSaving = false
+    private(set) var savedAt: Date?
     private var originalParticipants: Set<String> = []
     var removedParticipants: [String] = []
 
@@ -52,7 +56,13 @@ final class ComposeModel: Identifiable {
     /// Envio programado: o servidor segura até esta hora (requisito).
     var sendAt: Date?
 
-    var hasContent: Bool { !String(body.characters).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    var hasContent: Bool {
+        !String(body.characters).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+            !attachments.isEmpty || !to.isEmpty || !cc.isEmpty || !subject.isEmpty
+    }
+
+    var canSend: Bool { draft != nil && !isBusy && !currentRecipients.to.isEmpty }
+
 
     func start() async {
         do {
@@ -69,12 +79,12 @@ final class ComposeModel: Identifiable {
                 let eml = try await graph.mime(messageID: id)
                 try await graph.addAttachment(draftID: d.id, name: (original.subject ?? "mensagem") + ".eml", contentType: "message/rfc822", data: eml)
                 attachments.append((original.subject ?? "mensagem") + ".eml")
-                subject = "FW: " + (original.subject ?? "")
             }
             draft = d
             to = (d.toRecipients ?? []).map(\.display).joined(separator: ", ")
             cc = (d.ccRecipients ?? []).map(\.display).joined(separator: ", ")
-            subject = d.subject ?? ""
+            if case .forwardAsAttachment = mode { /* assunto definido junto com o anexo */ }
+            else { subject = d.subject ?? "" }
             originalParticipants = Set(((d.toRecipients ?? []) + (d.ccRecipients ?? [])).compactMap { $0.emailAddress.address?.lowercased() })
             isBusy = false
         } catch {
@@ -162,29 +172,75 @@ final class ComposeModel: Identifiable {
         return "<br><br><div class=\"mm-signature\">\(html)</div>"
     }
 
-    /// Grava o rascunho e envia. Chamado depois dos 10 s de arrependimento.
-    func send() async {
-        guard let draft else { return }
+    private var patch: DraftPatch {
+        let quoted: String
+        if let content = draft?.body?.content {
+            quoted = draft?.body?.contentType.lowercased() == "html" ? content : content.htmlEscaped.replacingOccurrences(of: "\n", with: "<br>")
+        } else { quoted = "" }
+        return DraftPatch(subject: subject, toRecipients: currentRecipients.to, ccRecipients: currentRecipients.cc,
+                          body: ItemBody(contentType: "html", content: RichText.html(from: body) + signatureHTML + "<br>" + quoted))
+    }
+
+    /// Escritas serializadas: uma gravação antiga não pode sobrescrever a mais recente.
+    private func saveDraft(includeScheduling: Bool = false) async throws {
+        guard let draft else { throw GraphError.notSignedIn }
+        let previous = saveOperation
+        var snapshot = patch
+        // A gravação automática não agenda o transporte. Só a confirmação final grava essa propriedade.
+        if includeScheduling, let sendAt { snapshot.singleValueExtendedProperties = [.deferredSend(at: sendAt)] }
+        let graph = graph
+        let operation = Task {
+            _ = try? await previous?.value
+            try await graph.updateDraft(id: draft.id, snapshot)
+        }
+        saveOperation = operation
+        try await operation.value
+        savedAt = Date()
+    }
+
+    func scheduleAutosave() {
+        guard draft != nil, !isBusy else { return }
+        autosaveTask?.cancel()
+        autosaveTask = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(800)) } catch { return }
+            guard let self else { return }
+            isSaving = true
+            defer { isSaving = false }
+            do { try await saveDraft() }
+            catch { self.error = "Não foi possível salvar o rascunho: \(error.localizedDescription)" }
+        }
+    }
+
+    func prepareForSend() async -> Bool {
+        guard canSend else { return false }
         isBusy = true
         defer { isBusy = false }
-        do {
-            let quoted = draft.body?.contentType.lowercased() == "html" ? (draft.body?.content ?? "") : ""
-            let html = RichText.html(from: body) + signatureHTML + "<br>" + quoted
-            try await graph.updateDraft(id: draft.id, DraftPatch(
-                subject: subject, toRecipients: currentRecipients.to, ccRecipients: currentRecipients.cc,
-                body: ItemBody(contentType: "html", content: html), sendAt: sendAt
-            ))
-            try await graph.send(draftID: draft.id)
-        } catch {
-            self.error = error.localizedDescription
-        }
+        autosaveTask?.cancel()
+        error = nil
+        do { try await saveDraft(includeScheduling: true); return true }
+        catch { self.error = error.localizedDescription; return false }
+    }
+
+    /// Rascunho já salvo antes do timer. Uma falha anterior não contamina o resultado da nova tentativa.
+    func send() async {
+        guard let draft, !isBusy else { return }
+        isBusy = true
+        error = nil
+        defer { isBusy = false }
+        do { try await graph.send(draftID: draft.id) }
+        catch { self.error = error.localizedDescription }
     }
 
     /// Anexa um arquivo ao rascunho (até 3 MB nesta rota).
     func attach(_ url: URL) async {
-        guard let draft else { return }
+        guard let draft, !isBusy else { return }
+        isBusy = true
+        defer { isBusy = false }
         do {
-            let data = try Data(contentsOf: url)
+            if let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size > 3_000_000 {
+                error = "Anexo acima de 3 MB ainda não é suportado."; return
+            }
+            let data = try await Task.detached { try Data(contentsOf: url) }.value
             guard data.count <= 3_000_000 else { error = "Anexo acima de 3 MB ainda não é suportado."; return }
             let type = UTTypeFor(url)
             try await graph.addAttachment(draftID: draft.id, name: url.lastPathComponent, contentType: type, data: data)
@@ -199,8 +255,12 @@ final class ComposeModel: Identifiable {
     }
 
     func discard() async {
+        autosaveTask?.cancel()
+        error = nil
+        _ = try? await saveOperation?.value
         guard let draft else { return }
-        try? await graph.deleteDraft(id: draft.id)
+        do { try await graph.deleteDraft(id: draft.id) }
+        catch { self.error = error.localizedDescription }
     }
 }
 
@@ -210,6 +270,7 @@ struct ComposeEditor: View {
     @Bindable var model: ComposeModel
     let inline: Bool
     @State private var confirmRemoved = false
+    @State private var archiveAfterSend: String?
     @State private var confirmDiscard = false
     @State private var showSubject = false
     @State private var scheduling = false
@@ -222,7 +283,8 @@ struct ComposeEditor: View {
             HStack {
                 Text(model.title).font(.headline)
                 Spacer()
-                if model.isBusy { ProgressView().controlSize(.small) }
+                if model.isBusy || model.isSaving { ProgressView().controlSize(.small) }
+                if let saved = model.savedAt { Text("Salvo \(saved, format: .dateTime.hour().minute())").font(.caption).foregroundStyle(.secondary) }
             }
             Grid(alignment: .leading, verticalSpacing: 4) {
                 GridRow { Text("Para").foregroundStyle(.secondary).gridColumnAlignment(.trailing); RecipientField(prompt: "", text: $model.to).focused($focus, equals: .to) }
@@ -234,12 +296,14 @@ struct ComposeEditor: View {
                 }
             }
             .textFieldStyle(.roundedBorder)
+            .disabled(model.isBusy)
             TextEditor(text: $model.body, selection: $model.selection)
                 .focused($focus, equals: .body)
                 .font(.body)
                 .frame(minHeight: inline ? 160 : 300)
                 .scrollContentBackground(.hidden)
                 .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
+                .disabled(model.isBusy)
                 .onChange(of: model.body) { _, _ in model.applyShortcuts() }
             if !model.attachments.isEmpty {
                 HStack(spacing: 6) {
@@ -269,13 +333,14 @@ struct ComposeEditor: View {
                 if case let .reply(id, _) = model.mode {
                     Button("Enviar e arquivar") { trySend(thenArchive: id) }
                         .keyboardShortcut(.return, modifiers: [.command, .shift])
-                        .disabled(model.isBusy || model.draft == nil)
+                        .disabled(!model.canSend)
                 }
                 Button("Enviar") { trySend() }
                     .keyboardShortcut(.return, modifiers: .command)
                     .buttonStyle(.borderedProminent)
-                    .disabled(model.isBusy || model.draft == nil)
+                    .disabled(!model.canSend)
             }
+            .disabled(model.isBusy)
         }
         .padding(12)
         .background(Color.accentColor.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
@@ -285,7 +350,7 @@ struct ComposeEditor: View {
             Button("OK") { model.error = nil }
         } message: { Text(model.error ?? "") }
         .alert("Você tirou gente da conversa", isPresented: $confirmRemoved) {
-            Button("Enviar mesmo assim") { app.scheduleSend(model) }
+            Button("Enviar mesmo assim") { Task { await app.scheduleSend(model, thenArchive: archiveAfterSend) } }
             Button("Voltar", role: .cancel) {}
         } message: { Text("Não vão receber: " + model.removedParticipants.joined(separator: ", ")) }
         .alert("Descartar o rascunho?", isPresented: $confirmDiscard) {
@@ -293,14 +358,20 @@ struct ComposeEditor: View {
             Button("Continuar escrevendo", role: .cancel) {}
         }
         // Responder e encaminhar começam no texto; mensagem nova começa no Para.
-        .onChange(of: model.isBusy) { _, busy in if !busy { focus = model.mode == .new ? .to : .body } }
+        .onChange(of: model.draft?.id, initial: true) { _, id in if id != nil { focus = model.mode == .new ? .to : .body } }
+        .onChange(of: model.body) { _, _ in model.scheduleAutosave() }
+        .onChange(of: model.to) { _, _ in model.scheduleAutosave() }
+        .onChange(of: model.cc) { _, _ in model.scheduleAutosave() }
+        .onChange(of: model.subject) { _, _ in model.scheduleAutosave() }
+        .onChange(of: model.sendAt) { _, _ in model.scheduleAutosave() }
     }
 
     private func trySend(thenArchive: String? = nil) {
+        guard model.canSend else { return }
+        archiveAfterSend = thenArchive
         model.removedParticipants = model.checkRemovedParticipants()
         if model.removedParticipants.isEmpty {
-            app.scheduleSend(model)
-            if let id = thenArchive { Task { await app.move(id, to: .archive) } }
+            Task { await app.scheduleSend(model, thenArchive: thenArchive) }
         } else {
             confirmRemoved = true
         }
@@ -315,6 +386,6 @@ struct ComposeEditor: View {
     }
 
     private func discard() {
-        Task { await model.discard(); app.compose = nil }
+        Task { await model.discard(); if model.error == nil { app.compose = nil } }
     }
 }

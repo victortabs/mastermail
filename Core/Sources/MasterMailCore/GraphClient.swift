@@ -20,6 +20,10 @@ public actor GraphClient {
     private let store: TokenStore
     private let session: URLSession
     private var tokens: Tokens?
+    private var refreshTask: Task<Tokens, Error>?
+    private var authGeneration = UUID()
+    private var retryNotBefore = Date.distantPast
+    private var throttleError: GraphError?
 
     public init(config: OAuthConfig, store: TokenStore, session: URLSession = .shared) {
         self.config = config
@@ -36,11 +40,15 @@ public actor GraphClient {
     public var isSignedIn: Bool { tokens != nil }
 
     public func signIn(_ tokens: Tokens) throws {
-        self.tokens = tokens
         try store.save(tokens)
+        authGeneration = UUID()
+        self.tokens = tokens
     }
 
     public func signOut() {
+        authGeneration = UUID()
+        refreshTask?.cancel()
+        refreshTask = nil
         tokens = nil
         store.clear()
     }
@@ -75,6 +83,7 @@ public actor GraphClient {
     }
 
     private func send(method: String, url: URL, body: Data?, headers: [String: String]) async throws -> Data {
+        if Date() < retryNotBefore, let throttleError { throw throttleError }
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("Bearer \(try await validAccessToken())", forHTTPHeaderField: "Authorization")
@@ -83,11 +92,20 @@ public actor GraphClient {
             request.httpBody = body
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
+        let generation = authGeneration
         let (data, response) = try await session.data(for: request)
+        guard generation == authGeneration else { throw GraphError.notSignedIn }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200 ..< 300).contains(status) else {
-            if status == 401 { tokens = nil; store.clear() }
-            throw GraphError.http(status: status, body: String(decoding: data, as: UTF8.self))
+            if status == 401 { signOut() }
+            let error = GraphError.http(status: status, body: String(decoding: data, as: UTF8.self))
+            if status == 429 || status == 503 {
+                let retry = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Retry-After")
+                let seconds = retry.flatMap(TimeInterval.init) ?? 60
+                retryNotBefore = Date().addingTimeInterval(max(1, seconds))
+                throttleError = error
+            }
+            throw error
         }
         return data
     }
@@ -96,12 +114,22 @@ public actor GraphClient {
     public func bearer() async throws -> String { try await validAccessToken() }
 
     private func validAccessToken() async throws -> String {
-        guard var current = tokens else { throw GraphError.notSignedIn }
-        if current.isExpired {
-            current = try await OAuth.refresh(current, config: config, session: session)
-            try signIn(current)
+        guard let current = tokens else { throw GraphError.notSignedIn }
+        guard current.isExpired else { return current.accessToken }
+        let generation = authGeneration
+        if let refreshTask {
+            let refreshed = try await refreshTask.value
+            guard authGeneration == generation, tokens != nil else { throw GraphError.notSignedIn }
+            return refreshed.accessToken
         }
-        return current.accessToken
+        let task = Task { try await OAuth.refresh(current, config: config, session: session) }
+        refreshTask = task
+        defer { if authGeneration == generation { refreshTask = nil } }
+        let refreshed = try await task.value
+        guard authGeneration == generation, tokens != nil else { throw GraphError.notSignedIn }
+        try store.save(refreshed)
+        tokens = refreshed
+        return refreshed.accessToken
     }
 
     /// O Graph devolve datas ISO 8601 com até 7 casas decimais; o decoder padrão não aceita fração.

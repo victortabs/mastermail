@@ -25,7 +25,6 @@ struct MessageBodyView: NSViewRepresentable {
             }
         }
         web.setValue(false, forKey: "drawsBackground")
-        if !allowRemote { Task { await Self.applyBlockList(to: config.userContentController) } }
         return web
     }
 
@@ -33,7 +32,7 @@ struct MessageBodyView: NSViewRepresentable {
         let content = html.map(HTMLText.collapseQuotes) ?? "<pre style=\"white-space:pre-wrap;font-family:-apple-system\">\(text.htmlEscaped)</pre>"
         guard context.coordinator.lastLoaded != content else { return }
         context.coordinator.lastLoaded = content
-        web.loadHTMLString(Self.wrap(content), baseURL: nil)
+        web.loadHTMLString(HTMLText.document(content, allowRemoteImages: allowRemote), baseURL: nil)
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -52,33 +51,15 @@ struct MessageBodyView: NSViewRepresentable {
         func webView(_ web: WKWebView, didCommit _: WKNavigation!) {}
         func webView(_ web: WKWebView, decidePolicyFor action: WKNavigationAction, preferences: WKWebpagePreferences) async -> (WKNavigationActionPolicy, WKWebpagePreferences) {
             if action.navigationType == .linkActivated, let url = action.request.url {
-                NSWorkspace.shared.open(url)
+                if ["https", "http", "mailto"].contains(url.scheme?.lowercased() ?? "") { NSWorkspace.shared.open(url) }
                 return (.cancel, preferences)
             }
-            return (.allow, preferences)
+            return (action.request.url?.scheme == "about" ? .allow : .cancel, preferences)
         }
 
     }
 
-    private static func wrap(_ html: String) -> String {
-        """
-        <!doctype html><meta charset="utf-8">
-        <style>body{font:14px -apple-system,sans-serif;color:CanvasText;background:transparent;margin:0}
-        @media (prefers-color-scheme: dark){body{color:#ddd}} img{max-width:100%}
-        details.mm-quote>summary{color:#888;cursor:pointer;font-size:12px;margin:8px 0;list-style:none}
-        details.mm-quote>summary::before{content:"";display:inline-block;width:24px;border-top:1px solid #aaa;margin-right:6px;vertical-align:middle}</style>
-        \(html)
-        """
-    }
 
-    /// Bloqueia todo carregamento http(s): imagens de rastreio, fontes, scripts. `cid:` e `data:` passam.
-    private static let blockList = #"[{"trigger":{"url-filter":"^https?://"},"action":{"type":"block"}}]"#
-
-    private static func applyBlockList(to controller: WKUserContentController) async {
-        if let list = try? await WKContentRuleListStore.default().compileContentRuleList(forIdentifier: "block-remote", encodedContentRuleList: blockList) {
-            controller.add(list)
-        }
-    }
 }
 
 /// A mensagem cabe inteira (altura medida), então a roda do mouse vai para o ScrollView de fora.

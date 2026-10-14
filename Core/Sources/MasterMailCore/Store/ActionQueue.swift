@@ -8,7 +8,7 @@ public enum PendingAction: Codable, Sendable, Equatable {
     case localFolder(id: String, name: String?)
     case categories(id: String, categories: [String])
 
-    var messageID: String {
+    public var messageID: String {
         switch self {
         case let .markRead(id, _), let .flag(id, _), let .move(id, _), let .localFolder(id, _), let .categories(id, _): id
         }
@@ -19,6 +19,8 @@ public enum PendingAction: Codable, Sendable, Equatable {
 public actor ActionQueue {
     public let fileURL: URL
     private(set) var items: [PendingAction]
+    private var isDraining = false
+    public private(set) var lastError: String?
 
     public init(fileURL: URL) {
         self.fileURL = fileURL
@@ -31,32 +33,44 @@ public actor ActionQueue {
     }
 
     public var count: Int { items.count }
-
-    public func enqueue(_ action: PendingAction) {
-        items.append(action)
-        persist()
+    public var pendingActions: [PendingAction] { items }
+    public var localFolderIDs: Set<String> {
+        Set(items.compactMap { if case let .localFolder(id, _) = $0 { id } else { nil } })
     }
 
-    /// Executa tudo o que der. Devolve quantas ações foram concluídas. Erros de rede param a drenagem; HTTP 4xx descarta a ação.
+    public func enqueue(_ action: PendingAction) throws { try enqueue([action]) }
+
+    public func enqueue(_ actions: [PendingAction]) throws {
+        guard !actions.isEmpty else { return }
+        items.append(contentsOf: actions)
+        do { try persist() }
+        catch { items.removeLast(actions.count); throw error }
+    }
+
+    /// Uma drenagem por vez. Falhas ficam visíveis e persistidas, inclusive 401 e 429.
     @discardableResult
     public func drain(using graph: GraphClient) async -> Int {
+        guard !isDraining else { return 0 }
+        isDraining = true
+        defer { isDraining = false }
+        lastError = nil
         var done = 0
         while let action = items.first {
+            if Task.isCancelled { break }
             do {
                 try await perform(action, graph)
                 items.removeFirst()
-                done += 1
-            } catch let error as GraphError {
-                if case let .http(status, _) = error, (400 ..< 500).contains(status) {
-                    items.removeFirst() // o servidor recusou de vez (mensagem apagada etc.): não adianta insistir
-                    continue
+                do { try persist() }
+                catch {
+                    items.insert(action, at: 0)
+                    throw error
                 }
-                break
+                done += 1
             } catch {
-                break // sem rede: fica para o próximo ciclo
+                lastError = error.localizedDescription
+                break
             }
         }
-        persist()
         return done
     }
 
@@ -70,8 +84,8 @@ public actor ActionQueue {
         }
     }
 
-    private func persist() {
-        try? FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? JSONEncoder().encode(items).write(to: fileURL, options: .atomic)
+    private func persist() throws {
+        try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONEncoder().encode(items).write(to: fileURL, options: .atomic)
     }
 }

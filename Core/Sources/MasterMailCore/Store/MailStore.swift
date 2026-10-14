@@ -185,7 +185,33 @@ public final class MailStore: Sendable {
         migrator.registerMigration("v5") { db in
             try db.alter(table: "message") { t in t.add(column: "meetingMessageType", .text) }
         }
+        migrator.registerMigration("v6-account-owner") { db in
+            try db.create(table: "account_owner") { t in
+                t.primaryKey("key", .text)
+                t.column("identifier", .text).notNull()
+                t.column("displayName", .text).notNull()
+            }
+        }
         return migrator
+    }
+
+    /// A v1 tem uma única conta. Impede reutilizar o índice e a fila de outra pessoa ao reconectar.
+    public func claimAccount(identifier: String, displayName: String) throws {
+        try pool.write { db in
+            if let owner = try Row.fetchOne(db, sql: "SELECT identifier, displayName FROM account_owner WHERE key = 'primary'") {
+                let stored: String = owner["identifier"]
+                guard stored == identifier else { throw AccountMismatch(expected: owner["displayName"]) }
+            } else {
+                try db.execute(sql: "INSERT INTO account_owner(key, identifier, displayName) VALUES ('primary', ?, ?)", arguments: [identifier, displayName])
+            }
+        }
+    }
+
+    public struct AccountMismatch: Error, LocalizedError, Sendable {
+        public let expected: String
+        public var errorDescription: String? {
+            "Este Índice local pertence a \(expected). Reconecte essa conta. A v1 usa uma única conta por instalação."
+        }
     }
 
     // MARK: Leitura
@@ -278,10 +304,12 @@ public final class MailStore: Sendable {
     }
 
     /// Aplica o que o servidor diz: mensagens listadas ganham a pasta; as demais com pasta local perdem.
-    public func applyLocalFolders(_ assignments: [String: String]) throws {
+    public func applyLocalFolders(_ assignments: [String: String], preserving pendingIDs: Set<String> = []) throws {
         try pool.write { db in
-            try db.execute(sql: "UPDATE message SET localFolder = NULL WHERE localFolder IS NOT NULL")
-            for (id, name) in assignments {
+            var request = StoredMessage.filter(Column("localFolder") != nil)
+            if !pendingIDs.isEmpty { request = request.filter(!pendingIDs.contains(Column("id"))) }
+            _ = try request.updateAll(db, Column("localFolder").set(to: nil as String?))
+            for (id, name) in assignments where !pendingIDs.contains(id) {
                 try db.execute(sql: "UPDATE message SET localFolder = ? WHERE id = ?", arguments: [name, id])
             }
         }
@@ -339,7 +367,8 @@ public final class MailStore: Sendable {
     // MARK: Escrita
 
     /// Grava o que veio do servidor sem perder o que é só local (Pasta local reconciliada, Adiar).
-    public func upsert(_ messages: [StoredMessage]) throws {
+    public func upsert(_ messages: [StoredMessage], preserving pendingActions: [PendingAction] = []) throws {
+        let pendingByMessage = Dictionary(grouping: pendingActions, by: \.messageID)
         try pool.write { db in
             for var m in messages {
                 // A sincronização recria o registro; o que é só local (Pasta local reconciliada, Adiar,
@@ -354,8 +383,32 @@ public final class MailStore: Sendable {
                     m.classifiedAt = existing.classifiedAt
                     m.triagemConfirmada = existing.triagemConfirmada
                 }
+                for action in pendingByMessage[m.id] ?? [] {
+                    switch action {
+                    case let .markRead(_, value): m.isRead = value
+                    case let .flag(_, value): m.isFlagged = value
+                    case let .localFolder(_, value): m.localFolder = value
+                    case let .categories(_, value): m.categories = value
+                    case .move: break
+                    }
+                }
                 try m.save(db)
             }
+        }
+    }
+
+    /// Grava somente o corpo baixado, preservando ações feitas enquanto a rede respondia.
+    public func cacheBody(id: String, html: String?) throws {
+        try pool.write { db in
+            try db.execute(sql: "UPDATE message SET bodyHTML = ? WHERE id = ?", arguments: [html, id])
+        }
+    }
+
+    /// Movimentações do servidor podem trocar o id; preserva os metadados locais em uma transação.
+    public func replace(id: String, with message: StoredMessage) throws {
+        try pool.write { db in
+            _ = try StoredMessage.deleteOne(db, key: id)
+            try message.save(db)
         }
     }
 

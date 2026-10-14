@@ -47,18 +47,26 @@ struct MailboxView: View {
                 Button { if let id = targetID { model.startCompose(.forward(messageID: id)) } } label: { Label("Encaminhar", systemImage: "arrowshape.turn.up.right") }.disabled(targetID == nil)
             }
             ToolbarItemGroup {
-                Button { model.showAssistant.toggle() } label: { Label("Aba lateral", systemImage: "sparkles") }.keyboardShortcut("a", modifiers: [.command, .shift])
+                if model.aiEnabled {
+                    Button { model.showAssistant.toggle() } label: { Label("Aba lateral", systemImage: "sparkles") }.keyboardShortcut("a", modifiers: [.command, .shift])
+                }
                 Button { showPalette = true } label: { Label("Paleta de comandos", systemImage: "command") }.keyboardShortcut("k", modifiers: .command)
                 Button { Task { await model.refresh() } } label: { Label("Atualizar", systemImage: "arrow.clockwise") }.keyboardShortcut("r", modifiers: [.command, .shift])
             }
         }
         .overlay(alignment: .bottom) { ToastView() }
-        .onChange(of: selection) { _, id in
-            guard let id, let message = model.messages.first(where: { $0.id == id }) else { return }
-            Task { await model.open(message) }
+        .task(id: selection) {
+            guard let id = selection, let message = model.messages.first(where: { $0.id == id }) else { return }
+            await model.open(message)
         }
+        .onChange(of: model.messages.map(\.id)) { old, new in
+            guard let id = selection, !new.contains(id) else { return }
+            if let index = old.firstIndex(of: id), !new.isEmpty { selection = new[min(index, new.count - 1)] }
+            else { selection = nil }
+        }
+        .onChange(of: model.selection) { _, _ in selection = nil }
         .sheet(item: Binding(get: { model.compose?.mode == .new ? model.compose : nil }, set: { if $0 == nil { model.compose = nil } })) { compose in
-            NavigationStack { ComposeEditor(model: compose, inline: false) }
+            NavigationStack { ComposeEditor(model: compose, inline: false).interactiveDismissDisabled(compose.hasContent) }
         }
         .sheet(item: $pickingFolderFor) { _ in
             LocalFolderPicker { name in pickingFolderFor = nil; act { await model.moveToLocalFolder($0, name) } }
@@ -74,7 +82,8 @@ struct MailboxView: View {
         }
         // Atalhos estilo Gmail (docs/04-ux.md). Teclas únicas valem fora de campos de texto.
         .onKeyPress(characters: .init(charactersIn: "jkeu#/vrfchszo?Oyn"), phases: .down) { press in
-            if model.compose != nil { return .ignored }
+            if model.compose != nil || searchFocused || NSApplication.shared.keyWindow?.firstResponder is NSTextView { return .ignored }
+            if !press.modifiers.intersection([.command, .control, .option]).isEmpty { return .ignored }
             if model.conversationFocused {
                 switch press.characters {
                 case "j": model.moveFocus(1)
@@ -196,7 +205,7 @@ struct MailboxView: View {
             .init("Organizar a caixa (proposta de regras e pastas)", "") { model.showOrganizer = true },
             .init("Reenviar", "") { if let id = targetID { model.startCompose(.resend(messageID: id)) } },
             .init("Encaminhar como anexo", "") { if let id = targetID { model.startCompose(.forwardAsAttachment(messageID: id)) } },
-        ]
+        ].filter { model.aiEnabled || !["Aba lateral", "Organizar a caixa (proposta de regras e pastas)"].contains($0.name) }
     }
 }
 
@@ -222,14 +231,18 @@ struct ToastView: View {
 
     var body: some View {
         if let toast = model.toast {
-            Text(toast)
+            HStack(spacing: 8) {
+                Text(toast)
+                if toast.contains("· desfazer (z)"), !model.undoStack.isEmpty {
+                    Button("Desfazer") { Task { await model.undo() } }.buttonStyle(.plain).foregroundStyle(Color.accentColor)
+                }
+            }
                 .font(.callout)
                 .padding(.horizontal, 14).padding(.vertical, 8)
                 .background(.regularMaterial, in: Capsule())
                 .shadow(radius: 4)
                 .padding(.bottom, 12)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
-                .onTapGesture { Task { await model.undo() } }
         }
     }
 }
@@ -278,7 +291,7 @@ struct FolderList: View {
                     .tag(AppModel.SidebarItem.account(known))
                 }
             }
-            Section("Triagem") {
+            if model.aiEnabled { Section("Triagem") {
                 HStack {
                     Label("Triagem", systemImage: "tray.and.arrow.down")
                     Spacer()
@@ -286,7 +299,7 @@ struct FolderList: View {
                 }
                 .tag(AppModel.SidebarItem.triage)
                 Label("Ruído", systemImage: "speaker.slash").tag(AppModel.SidebarItem.noise)
-            }
+            } }
             if !model.failedSends.isEmpty {
                 Section {
                     HStack {
@@ -317,7 +330,7 @@ struct FolderList: View {
                 HStack {
                     Text("Pastas locais")
                     Spacer()
-                    Button { model.showOrganizer = true } label: { Image(systemName: "wand.and.stars") }.buttonStyle(.plain).help("Organizar a caixa")
+                    if model.aiEnabled { Button { model.showOrganizer = true } label: { Image(systemName: "wand.and.stars") }.buttonStyle(.plain).help("Organizar a caixa") }
                     Button { creating = true } label: { Image(systemName: "plus") }.buttonStyle(.plain)
                 }
             }
@@ -328,7 +341,18 @@ struct FolderList: View {
             Button("Cancelar", role: .cancel) { renaming = nil }
         }
         .safeAreaInset(edge: .bottom) {
-            if model.pendingCount > 0 {
+            if let error = model.syncError ?? model.queueError {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("Falha na sincronização", systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+                    Text(error).lineLimit(3).foregroundStyle(.secondary).help(error)
+                    HStack {
+                        Button("Tentar de novo") { Task { await model.refresh() } }
+                        Button("Reconectar") { Task { await model.signIn() } }
+                    }.controlSize(.mini)
+                }.font(.caption).padding(6).frame(maxWidth: .infinity, alignment: .leading).background(.bar)
+            } else if model.pendingSendCount > 0 {
+                Label("\(model.pendingSendCount) envio(s) aguardando 10 s", systemImage: "paperplane").font(.caption).padding(6).frame(maxWidth: .infinity).background(.bar)
+            } else if model.pendingCount > 0 {
                 Label("\(model.pendingCount) ação(ões) aguardando conexão", systemImage: "wifi.slash").font(.caption2).foregroundStyle(.orange).padding(6).frame(maxWidth: .infinity).background(.bar)
             } else if !model.aiStatus.isEmpty {
                 Text("IA: \(model.aiStatus)").font(.caption2).foregroundStyle(.secondary).lineLimit(2).padding(6).frame(maxWidth: .infinity).background(.bar)
@@ -404,7 +428,7 @@ struct SnoozePicker: View {
                 Button(label) { onPick(date) }.buttonStyle(.plain)
             }
             Divider()
-            DatePicker("Outra data", selection: $custom)
+            DatePicker("Outra data", selection: $custom, in: Date()...)
             HStack {
                 Spacer()
                 Button("Cancelar") { dismiss() }.keyboardShortcut(.cancelAction)
@@ -425,8 +449,8 @@ struct OutboxList: View {
                 Text(f.subject.isEmpty ? "(sem assunto)" : f.subject).fontWeight(.semibold)
                 Text(f.error).font(.caption).foregroundStyle(.red).lineLimit(3)
                 HStack {
-                    Button("Tentar de novo") { Task { await model.retrySend(f) } }
-                    Button("Manter em Rascunhos") { model.discardFailed(f) }
+                    Button("Tentar de novo") { Task { await model.retrySend(f) } }.disabled(f.compose.isBusy)
+                    Button("Manter em Rascunhos") { model.discardFailed(f) }.disabled(f.compose.isBusy)
                 }
                 .controlSize(.small)
             }
@@ -488,7 +512,9 @@ struct MessageList: View {
         .safeAreaInset(edge: .top, spacing: 0) { TodayStrip() }
         .overlay {
             if model.messages.isEmpty {
-                if !model.searchText.isEmpty {
+                if model.isSearching {
+                    ProgressView("Buscando…")
+                } else if !model.searchText.isEmpty {
                     ContentUnavailableView.search(text: model.searchText)
                 } else if model.isSyncing, model.selection == .account(.inbox) {
                     ContentUnavailableView("Indexando", systemImage: "arrow.triangle.2.circlepath", description: Text(model.syncStatus))
@@ -501,6 +527,7 @@ struct MessageList: View {
 }
 
 struct MessageRow: View {
+    @Environment(AppModel.self) private var model
     let message: StoredMessage
 
     var body: some View {
@@ -521,12 +548,12 @@ struct MessageRow: View {
                 .lineLimit(1).fontWeight(message.isRead ? .regular : .semibold)
             Text(message.preview).font(.caption).foregroundStyle(.secondary).lineLimit(2)
             HStack(spacing: 4) {
-                if message.importante { Badge("Importante", .red) }
-                if let tipo = message.tipo.flatMap(Tipo.init(rawValue:)), tipo != .pessoa { Badge(tipo.label, .gray) }
+                if model.aiEnabled, message.importante { Badge("Importante", .red) }
+                if model.aiEnabled, let tipo = message.tipo.flatMap(Tipo.init(rawValue:)), tipo != .pessoa { Badge(tipo.label, .gray) }
                 if !message.categories.isEmpty { CategoryChips(categories: message.categories) }
             }
             // Justificativa (CONTEXT.md): a IA explica em uma linha; com a IA desligada a linha não existe.
-            if let why = message.justificativa, !why.isEmpty, (message.importante || Tipo(rawValue: message.tipo ?? "")?.isRuido == true) {
+            if model.aiEnabled, let why = message.justificativa, !why.isEmpty, (message.importante || Tipo(rawValue: message.tipo ?? "")?.isRuido == true) {
                 Text(why).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
             }
         }
@@ -579,6 +606,6 @@ struct CategoryChips: View {
     static func color(for name: String) -> Color {
         let palette: [Color] = [.red, .orange, .yellow, .green, .teal, .blue, .indigo, .purple, .pink, .brown]
         let hash = name.unicodeScalars.reduce(5381) { ($0 << 5) &+ $0 &+ Int($1.value) }
-        return palette[abs(hash) % palette.count]
+        return palette[Int(UInt(bitPattern: hash) % UInt(palette.count))]
     }
 }

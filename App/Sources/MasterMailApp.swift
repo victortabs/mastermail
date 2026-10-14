@@ -63,6 +63,7 @@ struct SettingsView: View {
                 Toggle("Nuvem via OpenRouter (envia remetente, assunto e trecho de cada mensagem nova)", isOn: $ai.cloudEnabled)
                 SecureField("Chave da OpenRouter", text: $ai.openRouterKey)
                 TextField("Modelo", text: $ai.openRouterModel)
+                TextField("Modelo para o Organizador", text: $ai.openRouterHeavyModel)
                 Text("A chave fica só neste Mac, num arquivo com permissão restrita. Nunca vai para o repositório.")
                     .font(.caption).foregroundStyle(.secondary)
             }
@@ -70,7 +71,7 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .frame(width: 600, height: 680)
         .onAppear { ai = model.aiSettings.load() }
-        .onChange(of: ai) { _, new in try? model.aiSettings.save(new) }
+        .onChange(of: ai) { _, new in model.updateAISettings(new) }
     }
 }
 

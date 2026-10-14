@@ -35,10 +35,12 @@ final class AppModel {
         let subject: String
         let error: String
         let compose: ComposeModel
+        var archiveAfterSend: String? = nil
     }
 
     /// Uma ação que pode ser desfeita com `z`.
     struct UndoEntry {
+        let id = UUID()
         let title: String
         let undo: @MainActor () async -> Void
     }
@@ -69,23 +71,54 @@ final class AppModel {
     var remoteImagesAllowed: Set<String> = []
     private(set) var isSyncing = false
     private(set) var syncStatus = ""
-    var searchText = "" { didSet { if searchText != oldValue { Task { await reloadList() } } } }
+    private(set) var syncError: String?
+    private(set) var queueError: String?
+    private(set) var aiEnabled: Bool = true
+
+    func updateAISettings(_ settings: AISettings) {
+        do {
+            try aiSettings.save(settings)
+            aiEnabled = settings.localEnabled || settings.cloudEnabled
+            if !aiEnabled {
+                showAssistant = false; showOrganizer = false; aiStatus = ""
+                if selection == .triage || selection == .noise { selection = .account(.inbox) }
+            }
+            Task { await reloadList() }
+        } catch { errorMessage = error.localizedDescription }
+    }
+    private var searchTask: Task<Void, Never>?
+    private var listRevision = UUID()
+    private(set) var isSearching = false
+    private var isLoadingMore = false
+    var searchText = "" {
+        didSet {
+            guard searchText != oldValue else { return }
+            listRevision = UUID()
+            searchTask?.cancel()
+            searchTask = Task { [weak self] in
+                do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
+                await self?.reloadList()
+            }
+        }
+    }
     var errorMessage: String?
     /// O tenant pediu aprovação do administrador: URL de consentimento para mandar ao TI.
     var adminConsentURL: URL?
 
     /// Composição em curso. Responder/encaminhar aparecem inline na Conversa; nova mensagem em sheet.
     var compose: ComposeModel?
-    private var pendingSend: Task<Void, Never>?
+    private var pendingSends: [UUID: Task<Void, Never>] = [:]
+    private(set) var pendingSendCount = 0
 
     private(set) var undoStack: [UndoEntry] = []
     private(set) var toast: String?
     private var toastTask: Task<Void, Never>?
 
+    private var accountGeneration = UUID()
     private var graph: GraphClient?
     var client: GraphClient? { graph }
     /// IA (ADR 0004): Regra → modelo local → nuvem opt-in. Roda depois de cada sincronização da Caixa de entrada.
-    let aiSettings = AISettingsStore.default()
+    let aiSettings: AISettingsStore
     private(set) var pipeline: ClassificationPipeline?
     private(set) var triageCount = 0
     let assistant = AssistantModel()
@@ -93,7 +126,7 @@ final class AppModel {
     private let mac = MacCalendar()
     private(set) var failedSends: [FailedSend] = []
     /// Fila offline (requisito): escritas no servidor que falharam por rede, repetidas a cada ciclo.
-    private let queue = ActionQueue.default()
+    private let queue: ActionQueue
     private(set) var pendingCount = 0
     let planStore = OrganizationPlanStore.default()
     var showOrganizer = false
@@ -111,13 +144,19 @@ final class AppModel {
     static let redirectScheme = "msauth.\(Bundle.main.bundleIdentifier ?? "io.github.victortabs.mastermail")"
     static let clientIDDefaultsKey = "MasterMailClientID"
 
-    init() {
+    init(store: MailStore? = nil, aiSettings: AISettingsStore = .default(), queue: ActionQueue = .default(), client: GraphClient? = nil, configureAutomatically: Bool = true) {
+        self.aiSettings = aiSettings
+        self.queue = queue
+        self.graph = client
         do {
-            store = try MailStore(path: MailStore.defaultPath())
+            if let store { self.store = store }
+            else { self.store = try MailStore(path: MailStore.defaultPath()) }
         } catch {
             fatalError("Não abriu o Índice local: \(error)")
         }
-        if let id = Self.storedClientID { configure(clientID: id) }
+        let settings = aiSettings.load()
+        aiEnabled = settings.localEnabled || settings.cloudEnabled
+        if configureAutomatically, let id = Self.storedClientID { configure(clientID: id) }
     }
 
     static var storedClientID: String? {
@@ -135,10 +174,11 @@ final class AppModel {
     }
 
     private func configure(clientID: String) {
+        accountGeneration = UUID()
         let config = OAuthConfig(clientID: clientID, redirectURI: "\(Self.redirectScheme)://auth")
         let client = GraphClient(config: config, store: tokenStore)
         graph = client
-        sync = MailSync(graph: client, store: store)
+        sync = MailSync(graph: client, store: store, queue: queue)
         calendar = CalendarModel(graph: client)
         pipeline = ClassificationPipeline(store: store, settings: aiSettings)
         phase = .signedOut
@@ -168,31 +208,55 @@ final class AppModel {
     }
 
     func signOut() async {
+        accountGeneration = UUID()
         pollTask?.cancel()
         backfillTask?.cancel()
+        searchTask?.cancel()
+        listRevision = UUID()
+        for task in pendingSends.values { task.cancel() }
+        pendingSends = [:]
+        pendingSendCount = 0
+        compose = nil
+        undoStack = []
+        failedSends = []
         await graph?.signOut()
         messages = []
         folders = []
         openMessage = nil
         conversation = []
+        wellKnown = [:]
+        localFolders = []
+        accountEmail = ""
+        searchText = ""
+        showAssistant = false
+        NSApplication.shared.dockTile.badgeLabel = nil
         phase = .signedOut
     }
 
     private func loadAccount() async {
         guard let graph else { return }
+        let generation = accountGeneration
         do {
             let me = try await graph.me()
+            guard accountGeneration == generation else { return }
             accountEmail = (me.mail ?? me.userPrincipalName ?? "").lowercased()
+            guard let identifier = me.id ?? (accountEmail.isEmpty ? nil : accountEmail) else { throw GraphError.notSignedIn }
+            do { try store.claimAccount(identifier: identifier, displayName: accountEmail.isEmpty ? identifier : accountEmail) }
+            catch { await graph.signOut(); throw error }
             phase = .signedIn(account: accountEmail.isEmpty ? "conta" : accountEmail)
             await loadFolders()
+            guard accountGeneration == generation else { return }
             reloadLocalFolders()
+            pendingCount = await queue.count
             await folderChanged()
+            guard accountGeneration == generation else { return }
             refreshCounters()
             startPolling()
             startBackfill()
             Task { await reconcileLocalFolders() }
             Task { await calendar?.load() }
         } catch {
+            guard accountGeneration == generation else { return }
             errorMessage = error.localizedDescription
             phase = .signedOut
         }
@@ -221,8 +285,11 @@ final class AppModel {
 
     private func reconcileLocalFolders() async {
         guard let graph else { return }
+        let generation = accountGeneration
         do {
-            try store.applyLocalFolders(try await graph.localFolderAssignments())
+            let assignments = try await graph.localFolderAssignments()
+            guard accountGeneration == generation else { return }
+            try store.applyLocalFolders(assignments, preserving: await queue.localFolderIDs)
             reloadLocalFolders()
             await reloadList()
         } catch {
@@ -245,7 +312,9 @@ final class AppModel {
             let ids = try store.renameLocalFolder(old, to: trimmed)
             reloadLocalFolders()
             if selection == .local(old) { selection = .local(trimmed) }
-            for id in ids { try await graph?.setLocalFolder(id: id, trimmed) }
+            try await queue.enqueue(ids.map { .localFolder(id: $0, name: trimmed) })
+            pendingCount = await queue.count
+            Task { await drainQueue() }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -259,11 +328,11 @@ final class AppModel {
             try store.setLocalFolder(id: id, name)
             reloadLocalFolders()
             removeFromList(id)
-            await server(.localFolder(id: id, name: name)) { try await graph?.setLocalFolder(id: id, name) }
+            await server(.localFolder(id: id, name: name))
             pushUndo(name.map { "Movida para \($0)" } ?? "Tirada da pasta local") { [weak self] in
                 guard let self else { return }
                 try? store.setLocalFolder(id: id, old)
-                try? await graph?.setLocalFolder(id: id, old)
+                await server(.localFolder(id: id, name: old))
                 await reloadList()
             }
         } catch {
@@ -305,7 +374,8 @@ final class AppModel {
     }
 
     func refresh() async {
-        if let id = selectedFolderID { await syncFolder(id) }
+        await drainQueue()
+        if let id = selectedFolderID ?? wellKnown[.inbox] { await syncFolder(id) }
         await loadFolders()
         await reloadList()
     }
@@ -326,19 +396,22 @@ final class AppModel {
             try await sync.sync(folder: id) { [weak self] count in
                 Task { @MainActor in self?.syncStatus = "\(name): \(count)" }
             }
+            syncError = nil
             if id == selectedFolderID { await reloadList() }
             if id == wellKnown[.inbox] { await classifyInbox() }
         } catch {
-            errorMessage = error.localizedDescription
+            if !Task.isCancelled { syncError = error.localizedDescription }
         }
     }
 
     // MARK: IA (Tipo, Importante, Triagem, Regras)
 
     private func classifyInbox() async {
+        guard aiEnabled else { return }
         guard let pipeline, let inbox = wellKnown[.inbox] else { return }
         let done = await pipeline.run(folder: inbox, max: 30)
-        if let error = await pipeline.lastError { aiStatus = error } else if done > 0 { aiStatus = "" }
+        guard aiEnabled else { return }
+        aiStatus = await pipeline.lastError ?? ""
         refreshCounters()
         if done > 0 {
             if selection == .account(.inbox) || selection == .triage { await reloadList() }
@@ -355,7 +428,7 @@ final class AppModel {
 
     /// Notificação do Mac só para Importante (requisito), uma vez por mensagem.
     private func notifyImportant() async {
-        guard let important = try? store.importantUnread(limit: 20) else { return }
+        guard let important = try? store.importantUnread(limit: 20), !important.isEmpty else { return }
         let center = UNUserNotificationCenter.current()
         let granted = (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
         guard granted else { return }
@@ -379,7 +452,7 @@ final class AppModel {
             refreshCounters()
             if let tipo = m.tipo.flatMap(Tipo.init(rawValue:)) {
                 let categories = Array(Set(m.categories + [tipo.label]))
-                await server(.categories(id: id, categories: categories)) { try await graph?.setCategories(id: id, categories) }
+                await server(.categories(id: id, categories: categories))
             }
             pushUndo("Confirmado como \(m.tipo.flatMap(Tipo.init(rawValue:))?.label ?? "ruído")") { [weak self] in
                 try? self?.store.markNotNoise(id: id)
@@ -422,7 +495,9 @@ final class AppModel {
     private func page(offset: Int) throws -> [StoredMessage] {
         switch selection {
         case let .local(name): try store.messages(localFolder: name, limit: Self.pageSize, offset: offset)
-        case .account(.inbox): try wellKnown[.inbox].map { try store.inboxMessages(folder: $0, limit: Self.pageSize, offset: offset) } ?? []
+        case .account(.inbox): try wellKnown[.inbox].map {
+            try aiEnabled ? store.inboxMessages(folder: $0, limit: Self.pageSize, offset: offset) : store.messages(in: $0, limit: Self.pageSize, offset: offset)
+        } ?? []
         case .account: try selectedFolderID.map { try store.messages(in: $0, limit: Self.pageSize, offset: offset) } ?? []
         case .triage: try wellKnown[.inbox].map { try store.triage(folder: $0, limit: Self.pageSize, offset: offset) } ?? []
         case .noise: try wellKnown[.inbox].map { try store.noise(folder: $0, limit: Self.pageSize, offset: offset) } ?? []
@@ -435,42 +510,55 @@ final class AppModel {
     }
 
     func reloadList() async {
+        let revision = UUID()
+        listRevision = revision
+        let queryText = searchText
+        let selected = selection
+        isSearching = !queryText.isEmpty
+        defer { if listRevision == revision { isSearching = false } }
         do {
-            if searchText.isEmpty {
-                let page = try page(offset: 0)
-                messages = page
-                hasMore = page.count == Self.pageSize
+            if queryText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                messages = try page(offset: 0)
+                hasMore = messages.count == Self.pageSize
             } else {
-                let q = SearchQuery.parse(searchText)
-                var results = try store.search(q)
-                // Enquanto a Caixa de entrada não está toda indexada, completa com a busca do servidor (sem duplicar).
-                if let inbox = wellKnown[.inbox], !(try store.isFullyIndexed(folder: inbox)), !q.text.isEmpty, let graph {
-                    let seen = Set(results.map(\.id))
-                    if let remote = try? await graph.searchServer(q.text) {
-                        results += remote.filter { !seen.contains($0.id) }.map { StoredMessage(message: $0, folder: inbox) }
-                    }
-                }
+                let q = SearchQuery.parse(queryText)
+                let store = store
+                var results = try await Task.detached(priority: .userInitiated) { try store.search(q) }.value
+                guard listRevision == revision, selection == selected, !Task.isCancelled else { return }
                 messages = results
                 hasMore = false
+                // O servidor só complementa buscas simples: não pode ignorar os operadores locais.
+                if let inbox = wellKnown[.inbox], !(try store.isFullyIndexed(folder: inbox)), !q.hasOperators, !q.text.isEmpty, let graph {
+                    let seen = Set(results.map(\.id))
+                    if let remote = try? await graph.searchServer(q.text) {
+                        guard listRevision == revision, selection == selected, !Task.isCancelled else { return }
+                        results += remote.filter { !seen.contains($0.id) }.map { StoredMessage(message: $0, folder: $0.parentFolderId ?? inbox) }
+                        messages = results
+                    }
+                }
             }
         } catch {
-            errorMessage = error.localizedDescription
+            if listRevision == revision, !Task.isCancelled { errorMessage = error.localizedDescription }
         }
     }
 
     func loadMore() async {
-        guard hasMore, searchText.isEmpty else { return }
+        guard hasMore, searchText.isEmpty, !isLoadingMore else { return }
+        isLoadingMore = true
+        defer { isLoadingMore = false }
         do {
             let page = try page(offset: messages.count)
-            messages += page
+            let seen = Set(messages.map(\.id))
+            messages += page.filter { !seen.contains($0.id) }
             hasMore = page.count == Self.pageSize
-        } catch {
-            errorMessage = error.localizedDescription
-        }
+        } catch { errorMessage = error.localizedDescription }
     }
 
     /// Resultado de uma busca da Aba lateral substitui a lista.
     func showResults(_ results: [StoredMessage]) {
+        searchTask?.cancel()
+        listRevision = UUID()
+        isSearching = false
         messages = results
         hasMore = false
     }
@@ -491,9 +579,11 @@ final class AppModel {
             let newest = conversation.last?.id ?? message.id
             expanded = [message.id, newest]
             focusedNodeID = newest
-            await prepareBody(id: message.id)
-            if newest != message.id { await prepareBody(id: newest) }
             if !message.isRead { await setRead(message.id, true) }
+            guard openMessage?.id == message.id, !Task.isCancelled else { return }
+            await prepareBody(id: message.id)
+            guard openMessage?.id == message.id, !Task.isCancelled else { return }
+            if newest != message.id { await prepareBody(id: newest) }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -524,9 +614,12 @@ final class AppModel {
             if let html = m.bodyHTML, html.contains("cid:") {
                 m.bodyHTML = HTMLText.embedInline(html, attachments: try await graph.inlineAttachments(messageID: id))
             }
-            guard m != conversation[i].message else { return }
-            try store.upsert([m])
-            if conversation.indices.contains(i), conversation[i].id == id { conversation[i].message = m }
+            try Task.checkCancellation()
+            // Atualiza apenas o corpo: um delta/ação pode ter alterado o restante durante o download.
+            try store.cacheBody(id: id, html: m.bodyHTML)
+            if let current = conversation.firstIndex(where: { $0.id == id }) {
+                conversation[current].message.bodyHTML = m.bodyHTML
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -535,6 +628,7 @@ final class AppModel {
     // MARK: Composição
 
     func startCompose(_ mode: ComposeModel.Mode) {
+        if compose != nil { showToast("Conclua ou descarte o rascunho aberto antes de começar outro."); return }
         guard let graph else { return }
         let signature = UserDefaults.standard.string(forKey: "signatureHTML") ?? ""
         let model = ComposeModel(mode: mode, graph: graph, signature: signature)
@@ -542,32 +636,34 @@ final class AppModel {
         Task { await model.start() }
     }
 
-    /// Envio com 10 s de arrependimento (UX): fecha o editor na hora; `z` cancela e o rascunho fica em Rascunhos.
-    func scheduleSend(_ model: ComposeModel) {
-        compose = nil
-        pendingSend?.cancel()
-        let task = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(10))
-            guard !Task.isCancelled else { return }
+    /// Cada envio tem seu próprio timer. O rascunho é salvo antes de fechar o editor.
+    func scheduleSend(_ model: ComposeModel, thenArchive: String? = nil, delay: Duration = .seconds(10)) async {
+        guard pendingSends[model.id] == nil, await model.prepareForSend() else { return }
+        if compose?.id == model.id { compose = nil }
+        let undoID = pushUndo("Enviando em 10 s") { [weak self] in
+            guard let self, let task = pendingSends.removeValue(forKey: model.id) else { return }
+            task.cancel()
+            pendingSendCount = pendingSends.count
+            showToast("Envio cancelado. O rascunho está salvo em Rascunhos.")
+        }
+        pendingSends[model.id] = Task { [weak self] in
+            do { try await Task.sleep(for: delay) } catch { return }
+            guard let self, !Task.isCancelled else { return }
+            // Depois que começou a chamada ao servidor, já não é possível desfazer o envio.
+            undoStack.removeAll { $0.id == undoID }
             await model.send()
-            await MainActor.run {
-                guard let self else { return }
-                if let error = model.error {
-                    self.failedSends.append(FailedSend(subject: model.subject, error: error, compose: model))
-                    self.errorMessage = "Falha ao enviar \"\(model.subject)\": \(error)\nA mensagem está na Caixa de saída para tentar de novo."
-                    NSApplication.shared.requestUserAttention(.criticalRequest)
-                } else {
-                    self.showToast("Enviada")
-                }
-                self.pendingSend = nil
+            pendingSends.removeValue(forKey: model.id)
+            pendingSendCount = pendingSends.count
+            if let error = model.error {
+                failedSends.append(FailedSend(subject: model.subject, error: error, compose: model, archiveAfterSend: thenArchive))
+                errorMessage = "Falha ao enviar \"\(model.subject)\": \(error)\nA mensagem está na Caixa de saída para tentar de novo."
+                NSApplication.shared.requestUserAttention(.criticalRequest)
+            } else {
+                if let id = thenArchive { await move(id, to: .archive) }
+                showToast("Enviada")
             }
         }
-        pendingSend = task
-        pushUndo("Enviando em 10 s") { [weak self] in
-            task.cancel()
-            self?.pendingSend = nil
-            self?.showToast("Envio cancelado. O rascunho está em Rascunhos.")
-        }
+        pendingSendCount = pendingSends.count
     }
 
     // MARK: Organizador (proposta → Sugestão → aplicar)
@@ -593,7 +689,7 @@ final class AppModel {
             reloadLocalFolders()
             refreshCounters()
             await reloadList()
-            for (id, folder) in moved { await queue.enqueue(.localFolder(id: id, name: folder)) }
+            try await queue.enqueue(moved.map { .localFolder(id: $0.0, name: $0.1) })
             pendingCount = await queue.count
             showToast("\(plan.rules.count) regras e \(plan.folders.count) pastas aplicadas; \(moved.count) mensagens indo para as pastas no servidor")
             Task { await drainQueue() }
@@ -637,12 +733,13 @@ final class AppModel {
     }
 
     func retrySend(_ failed: FailedSend) async {
-        failedSends.removeAll { $0.id == failed.id }
+        guard !failed.compose.isBusy else { return }
         await failed.compose.send()
         if let error = failed.compose.error {
-            failedSends.append(FailedSend(subject: failed.subject, error: error, compose: failed.compose))
             errorMessage = error
         } else {
+            failedSends.removeAll { $0.id == failed.id }
+            if let id = failed.archiveAfterSend { await move(id, to: .archive) }
             showToast("Enviada")
         }
     }
@@ -663,25 +760,21 @@ final class AppModel {
         return remoteImagesAllowed.contains(m.id) || trustedImageSenders.contains(m.fromAddress.lowercased()) || trustedImageSenders.contains(domain)
     }
 
-    /// Executa no servidor; sem rede, enfileira e segue (a ação local já aconteceu).
-    private func server(_ action: PendingAction, _ call: () async throws -> Void) async {
+    /// A fila é persistida antes da tentativa e conserva a ordem das ações, inclusive do desfazer.
+    private func server(_ action: PendingAction) async {
         do {
-            try await call()
-        } catch let error as GraphError {
-            if case let .http(status, _) = error, (400 ..< 500).contains(status) { errorMessage = error.localizedDescription; return }
-            await queue.enqueue(action); pendingCount = await queue.count
-            showToast("Sem conexão: fica na fila (\(pendingCount))")
-        } catch {
-            await queue.enqueue(action); pendingCount = await queue.count
-            showToast("Sem conexão: fica na fila (\(pendingCount))")
-        }
+            try await queue.enqueue(action)
+            pendingCount = await queue.count
+            await drainQueue()
+        } catch { errorMessage = "Não foi possível guardar a ação: \(error.localizedDescription)" }
     }
 
     func drainQueue() async {
         guard let graph, await queue.count > 0 else { return }
         let done = await queue.drain(using: graph)
         pendingCount = await queue.count
-        if done > 0 { showToast("\(done) ação(ões) pendente(s) enviada(s)") }
+        queueError = await queue.lastError
+        if queueError == nil, done > 0 { showToast("\(done) ação(ões) pendente(s) enviada(s)") }
     }
 
     // MARK: Ações (local primeiro, servidor depois, todas com desfazer)
@@ -691,19 +784,22 @@ final class AppModel {
             try store.setRead(id: id, isRead)
             if let i = messages.firstIndex(where: { $0.id == id }) { messages[i].isRead = isRead }
             if openMessage?.id == id { openMessage?.isRead = isRead }
-            await server(.markRead(id: id, isRead: isRead)) { try await graph?.markRead(id: id, isRead) }
+            if let i = conversation.firstIndex(where: { $0.id == id }) { conversation[i].message.isRead = isRead }
+            await server(.markRead(id: id, isRead: isRead))
         } catch {
             errorMessage = error.localizedDescription
         }
     }
 
     func toggleFlag(_ id: String) async {
-        guard let m = messages.first(where: { $0.id == id }) else { return }
+        guard let m = messages.first(where: { $0.id == id }) ?? (try? store.message(id: id)) else { return }
         let flagged = !m.isFlagged
         do {
             try store.setFlagged(id: id, flagged)
             if let i = messages.firstIndex(where: { $0.id == id }) { messages[i].isFlagged = flagged }
-            await server(.flag(id: id, flagged: flagged)) { try await graph?.setFlag(id: id, flagged) }
+            if openMessage?.id == id { openMessage?.isFlagged = flagged }
+            if let i = conversation.firstIndex(where: { $0.id == id }) { conversation[i].message.isFlagged = flagged }
+            await server(.flag(id: id, flagged: flagged))
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -711,25 +807,36 @@ final class AppModel {
 
     /// Arquivar e Apagar são ações de servidor (CONTEXT.md). Some da lista na hora; desfazer traz de volta.
     func move(_ id: String, to destination: WellKnownFolder) async {
-        guard let m = messages.first(where: { $0.id == id }) ?? (try? store.message(id: id)) else { return }
-        let index = messages.firstIndex { $0.id == id } ?? 0
+        guard let graph, let m = messages.first(where: { $0.id == id }) ?? (try? store.message(id: id)) else { return }
         do {
-            try store.delete(ids: [id])
+            // Resolve escritas anteriores antes de uma operação que pode trocar o id da mensagem.
+            await drainQueue()
+            guard !(await queue.pendingActions).contains(where: { $0.messageID == id }) else {
+                errorMessage = "Há ações aguardando conexão. Tente arquivar ou apagar quando elas forem sincronizadas."
+                return
+            }
             removeFromList(id)
-            let moved = try await graph?.move(id: id, to: destination)
+            let moved: Message
+            do { moved = try await graph.move(id: id, to: destination) }
+            catch { await reloadList(); throw error }
+            var stored = m
+            stored.id = moved.id
+            stored.folder = moved.parentFolderId ?? wellKnown[destination] ?? destination.rawValue
+            try store.replace(id: id, with: stored)
+            refreshCounters()
             let title = destination == .archive ? "Arquivada" : "Apagada"
             pushUndo(title) { [weak self] in
-                guard let self, let moved, let back = m.folder as String? else { return }
-                var restored = m
-                if let again = try? await graph?.move(id: moved.id, destinationID: back) { restored.id = again.id }
-                try? store.upsert([restored])
-                if selection == .account(.inbox) || selection == .local(m.localFolder ?? "") {
-                    messages.insert(restored, at: min(index, messages.count))
-                }
+                guard let self else { return }
+                do {
+                    let again = try await graph.move(id: moved.id, destinationID: m.folder)
+                    var restored = m
+                    restored.id = again.id
+                    try store.replace(id: moved.id, with: restored)
+                    refreshCounters()
+                    await reloadList()
+                } catch { errorMessage = error.localizedDescription }
             }
-        } catch {
-            errorMessage = error.localizedDescription
-        }
+        } catch { errorMessage = error.localizedDescription }
     }
 
     func snooze(_ id: String, until: Date) async {
@@ -745,10 +852,13 @@ final class AppModel {
         }
     }
 
-    func pushUndo(_ title: String, _ undo: @escaping @MainActor () async -> Void) {
-        undoStack.append(UndoEntry(title: title, undo: undo))
+    @discardableResult
+    func pushUndo(_ title: String, _ undo: @escaping @MainActor () async -> Void) -> UUID {
+        let entry = UndoEntry(title: title, undo: undo)
+        undoStack.append(entry)
         if undoStack.count > 20 { undoStack.removeFirst() }
         showToast("\(title) · desfazer (z)")
+        return entry.id
     }
 
     func undo() async {
@@ -770,20 +880,41 @@ final class AppModel {
 enum WebAuth {
     @MainActor
     static func run(url: URL, callbackScheme: String) async throws -> URL {
-        let anchor = Anchor()
-        return try await withCheckedThrowingContinuation { continuation in
-            let session = ASWebAuthenticationSession(url: url, callbackURLScheme: callbackScheme) { @Sendable callback, error in
-                if let callback { continuation.resume(returning: callback) }
-                else { continuation.resume(throwing: error ?? OAuthError.invalidCallback) }
-            }
-            session.presentationContextProvider = anchor
-            session.prefersEphemeralWebBrowserSession = false
-            session.start()
-            withExtendedLifetime(anchor) {}
-        }
+        let context = SessionContext()
+        return try await context.run(url: url, callbackScheme: callbackScheme)
     }
 
-    private final class Anchor: NSObject, ASWebAuthenticationPresentationContextProviding {
+    /// Retém a sessão e sua janela até o callback; o provider da API é uma referência fraca.
+    @MainActor
+    private final class SessionContext: NSObject, ASWebAuthenticationPresentationContextProviding {
+        private var session: ASWebAuthenticationSession?
+        private var continuation: CheckedContinuation<URL, any Error>?
+
+        private func finish(_ result: Result<URL, any Error>) {
+            guard let continuation else { return }
+            self.continuation = nil
+            session = nil
+            continuation.resume(with: result)
+        }
+
+        func run(url: URL, callbackScheme: String) async throws -> URL {
+            try await withCheckedThrowingContinuation { continuation in
+                self.continuation = continuation
+                let session = ASWebAuthenticationSession(url: url, callbackURLScheme: callbackScheme) { [self] callback, error in
+                    Task { @MainActor in
+                        if let callback { finish(.success(callback)) }
+                        else { finish(.failure(error ?? OAuthError.invalidCallback)) }
+                    }
+                }
+                self.session = session
+                session.presentationContextProvider = self
+                session.prefersEphemeralWebBrowserSession = false
+                if !session.start() {
+                    finish(.failure(OAuthError.invalidCallback))
+                }
+            }
+        }
+
         func presentationAnchor(for _: ASWebAuthenticationSession) -> ASPresentationAnchor {
             NSApplication.shared.keyWindow ?? NSApplication.shared.windows.first ?? ASPresentationAnchor()
         }

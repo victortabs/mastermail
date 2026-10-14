@@ -14,6 +14,16 @@ struct AssistantAndSearchTests {
         #expect(!SearchQuery.parse("from:x").isEmpty)
     }
 
+    @Test func quotedOperatorsKeepNamesWithSpaces() {
+        let q = SearchQuery.parse(#"orcamento from:"Ana Silva" in:"Obras 2026""#)
+        #expect(q.text == "orcamento")
+        #expect(q.from == "Ana Silva")
+        #expect(q.localFolder == "Obras 2026")
+        #expect(q.hasOperators)
+        #expect(SearchQuery.parse("has:apple").text == "has:apple")
+        #expect(SearchQuery.parse("before:invalido").text == "before:invalido")
+    }
+
     @Test func searchWithOperatorsFiltersIndex() throws {
         let store = try MailStore.inMemory()
         func m(_ id: String, from: String, subject: String, attach: Bool, daysAgo: Int) -> StoredMessage {

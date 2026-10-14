@@ -17,18 +17,19 @@ public struct SearchQuery: Equatable, Sendable {
     public static func parse(_ raw: String) -> SearchQuery {
         var q = SearchQuery()
         var words: [String] = []
-        for token in raw.split(separator: " ") {
-            let t = String(token)
+        for token in raw.matches(of: /(?:[^\s"]+|"[^"]*")+/) {
+            let t = String(token.output)
             guard let colon = t.firstIndex(of: ":"), colon != t.startIndex else { words.append(t); continue }
             let key = t[..<colon].lowercased()
-            let value = String(t[t.index(after: colon)...])
+            let value = String(t[t.index(after: colon)...]).trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+            guard !value.isEmpty else { words.append(t); continue }
             switch key {
             case "from", "de": q.from = value
             case "to", "para": q.to = value
             case "org": q.org = value
-            case "has", "tem": if value.lowercased().hasPrefix("a") || value.lowercased() == "anexo" { q.hasAttachment = true } else { words.append(t) }
-            case "after", "depois": q.after = Self.date(value)
-            case "before", "antes": q.before = Self.date(value)
+            case "has", "tem": if ["attachment", "attachments", "anexo", "anexos"].contains(value.lowercased()) { q.hasAttachment = true } else { words.append(t) }
+            case "after", "depois": if let date = Self.date(value) { q.after = date } else { words.append(t) }
+            case "before", "antes": if let date = Self.date(value) { q.before = date } else { words.append(t) }
             case "in", "em": q.localFolder = value.replacingOccurrences(of: "_", with: " ")
             default: words.append(t)
             }
@@ -46,6 +47,8 @@ public struct SearchQuery: Equatable, Sendable {
         }
         return nil
     }
+
+    public var hasOperators: Bool { from != nil || to != nil || org != nil || hasAttachment || after != nil || before != nil || localFolder != nil }
 
     public var isEmpty: Bool { text.isEmpty && from == nil && to == nil && org == nil && !hasAttachment && after == nil && before == nil && localFolder == nil }
 }

@@ -65,6 +65,7 @@ public struct ItemBody: Codable, Sendable, Hashable {
 /// Uma Mensagem (ver CONTEXT.md): um e-mail individual, recebido ou enviado.
 public struct Message: Codable, Sendable, Hashable, Identifiable {
     public var id: String
+    public var parentFolderId: String?
     public var subject: String?
     public var from: Recipient?
     public var toRecipients: [Recipient]?
@@ -92,7 +93,7 @@ public struct Message: Codable, Sendable, Hashable, Identifiable {
     }
 
     public static let listFields = [
-        "id", "subject", "from", "toRecipients", "ccRecipients", "receivedDateTime",
+        "id", "parentFolderId", "subject", "from", "toRecipients", "ccRecipients", "receivedDateTime",
         "bodyPreview", "isRead", "hasAttachments", "conversationId", "conversationIndex", "categories", "flag", "meetingMessageType",
     ].joined(separator: ",")
 }
@@ -144,6 +145,7 @@ public struct Attachment: Decodable, Sendable, Identifiable, Hashable {
 }
 
 public struct User: Decodable, Sendable {
+    public var id: String?
     public var displayName: String?
     public var mail: String?
     public var userPrincipalName: String?
