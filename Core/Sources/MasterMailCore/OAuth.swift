@@ -50,6 +50,12 @@ public enum OAuthError: Error, LocalizedError, Sendable {
     case server(code: String, description: String?)
     case invalidResponse(status: Int)
 
+    /// Só uma rejeição explícita da autorização exige voltar ao login interativo.
+    public var requiresSignIn: Bool {
+        guard case let .server(code, _) = self else { return false }
+        return ["invalid_grant", "interaction_required", "login_required", "consent_required"].contains(code)
+    }
+
     /// AADSTS65001 / AADSTS90094: o tenant exige consentimento de administrador para este app.
     public var needsAdminConsent: Bool {
         if case let .server(code, description) = self {

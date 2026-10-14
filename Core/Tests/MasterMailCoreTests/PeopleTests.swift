@@ -17,11 +17,11 @@ struct PeopleTests {
     private func store() throws -> MailStore {
         let store = try MailStore.inMemory()
         try store.upsert([
-            sample(id: "1", from: ("Marina Silva", "marina@bdil.com.br"), to: [("Victor", "victor@vhicom.com.br"), ("", "carlos@bdil.com.br")]),
-            sample(id: "2", from: ("Victor", "Victor@vhicom.com.br"), to: [("Marina Silva", "marina@bdil.com.br"), ("Zé", "ze@gmail.com")], daysAgo: 1),
-            sample(id: "3", from: ("Ana", "ana@sephora.com"), to: [("Victor", "victor@vhicom.com.br")], daysAgo: 2),
+            sample(id: "1", from: ("Marina Silva", "marina@bdil.com.br"), to: [("Usuário", "owner@example.test"), ("", "carlos@bdil.com.br")]),
+            sample(id: "2", from: ("Usuário", "Owner@example.test"), to: [("Marina Silva", "marina@bdil.com.br"), ("Zé", "ze@gmail.com")], daysAgo: 1),
+            sample(id: "3", from: ("Ana", "ana@sephora.com"), to: [("Usuário", "owner@example.test")], daysAgo: 2),
         ])
-        try store.refreshPeople(me: "victor@vhicom.com.br")
+        try store.refreshPeople(me: "owner@example.test")
         return store
     }
 
@@ -51,7 +51,7 @@ struct PeopleTests {
         #expect(orgs[0].messageCount == 3 && orgs[0].contactCount == 3)
         #expect(try store.contacts(domain: "bdil.com.br").count == 3)
         #expect(try store.messages(domain: "bdil.com.br").map(\.id) == ["1", "2", "3"])
-        try store.refreshPeople(me: "victor@vhicom.com.br") // sobrevive ao recálculo
+        try store.refreshPeople(me: "owner@example.test") // sobrevive ao recálculo
         #expect(try store.organizations().map(\.name) == ["Bacio di Latte"])
     }
 

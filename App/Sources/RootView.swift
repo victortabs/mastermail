@@ -10,6 +10,20 @@ struct RootView: View {
             switch model.phase {
             case .needsClientID: ClientIDView()
             case .signedOut: SignInView()
+            case .restoringSession:
+                VStack(spacing: 16) {
+                    ProgressView()
+                    Text("Reconectando sua conta…")
+                }.padding(40)
+            case .sessionUnavailable:
+                VStack(spacing: 16) {
+                    Text("Sua conta continua salva.").font(.headline)
+                    Text("Não foi possível conectar agora. Verifique sua conexão; tentaremos novamente automaticamente.")
+                        .foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    Button("Tentar novamente") { Task { await model.restoreSession() } }
+                        .keyboardShortcut(.defaultAction)
+                    Button("Desconectar conta", role: .destructive) { Task { await model.signOut() } }
+                }.frame(maxWidth: 440).padding(40)
             case let .signedIn(account):
                 switch model.view {
                 case .mail: MailboxView(account: account)

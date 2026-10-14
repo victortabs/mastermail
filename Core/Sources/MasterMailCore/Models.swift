@@ -29,17 +29,41 @@ public struct DeltaMessage: Decodable, Sendable {
     public let id: String
     public let removed: Bool
     public let message: Message?
+    public let readState: Bool?
+    public let needsFullMessage: Bool
 
     enum CodingKeys: String, CodingKey {
         case id
         case removed = "@removed"
+        case receivedDateTime, isRead, hasAttachments
+    }
+
+    private struct Field: CodingKey {
+        var stringValue: String
+        var intValue: Int? { nil }
+        init?(stringValue: String) { self.stringValue = stringValue }
+        init?(intValue: Int) { return nil }
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
         removed = container.contains(.removed)
-        message = removed ? nil : try Message(from: decoder)
+        readState = removed ? nil : try container.decodeIfPresent(Bool.self, forKey: .isRead)
+        if removed {
+            message = nil
+            needsFullMessage = false
+        } else if container.contains(.receivedDateTime), container.contains(.hasAttachments),
+                  readState != nil, try !container.decodeNil(forKey: .receivedDateTime),
+                  try !container.decodeNil(forKey: .hasAttachments) {
+            message = try Message(from: decoder)
+            needsFullMessage = false
+        } else {
+            // O delta também emite eventos com apenas id + isRead.
+            let fields = Set(try decoder.container(keyedBy: Field.self).allKeys.map(\.stringValue))
+            message = nil
+            needsFullMessage = readState == nil || !fields.subtracting(["@odata.type", "id", "isRead"]).isEmpty
+        }
     }
 }
 
@@ -94,7 +118,8 @@ public struct Message: Codable, Sendable, Hashable, Identifiable {
 
     public static let listFields = [
         "id", "parentFolderId", "subject", "from", "toRecipients", "ccRecipients", "receivedDateTime",
-        "bodyPreview", "isRead", "hasAttachments", "conversationId", "conversationIndex", "categories", "flag", "meetingMessageType",
+        // meetingMessageType pertence a eventMessage; pedi-lo em uma coleção de message causa HTTP 400.
+        "bodyPreview", "isRead", "hasAttachments", "conversationId", "conversationIndex", "categories", "flag",
     ].joined(separator: ",")
 }
 

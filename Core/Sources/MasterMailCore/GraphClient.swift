@@ -86,18 +86,26 @@ public actor GraphClient {
         if Date() < retryNotBefore, let throttleError { throw throttleError }
         var request = URLRequest(url: url)
         request.httpMethod = method
-        request.setValue("Bearer \(try await validAccessToken())", forHTTPHeaderField: "Authorization")
+        let accessToken = try await validAccessToken()
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         for (key, value) in headers { request.setValue(value, forHTTPHeaderField: key) }
         if let body {
             request.httpBody = body
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
         let generation = authGeneration
-        let (data, response) = try await session.data(for: request)
+        var (data, response) = try await session.data(for: request)
         guard generation == authGeneration else { throw GraphError.notSignedIn }
+        // O servidor pode rejeitar um token antes da expiração local. Renova uma vez,
+        // preservando o refresh token se a rede falhar ou o Graph continuar rejeitando.
+        if (response as? HTTPURLResponse)?.statusCode == 401 {
+            request.setValue("Bearer \(try await validAccessToken(rejectedToken: accessToken))", forHTTPHeaderField: "Authorization")
+            guard generation == authGeneration else { throw GraphError.notSignedIn }
+            (data, response) = try await session.data(for: request)
+            guard generation == authGeneration else { throw GraphError.notSignedIn }
+        }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200 ..< 300).contains(status) else {
-            if status == 401 { signOut() }
             let error = GraphError.http(status: status, body: String(decoding: data, as: UTF8.self))
             if status == 429 || status == 503 {
                 let retry = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Retry-After")
@@ -113,9 +121,9 @@ public actor GraphClient {
     /// Token válido para chamadas feitas fora do cliente (ex.: download de MIME).
     public func bearer() async throws -> String { try await validAccessToken() }
 
-    private func validAccessToken() async throws -> String {
+    private func validAccessToken(rejectedToken: String? = nil) async throws -> String {
         guard let current = tokens else { throw GraphError.notSignedIn }
-        guard current.isExpired else { return current.accessToken }
+        if !current.isExpired, rejectedToken != current.accessToken { return current.accessToken }
         let generation = authGeneration
         if let refreshTask {
             let refreshed = try await refreshTask.value
@@ -125,7 +133,14 @@ public actor GraphClient {
         let task = Task { try await OAuth.refresh(current, config: config, session: session) }
         refreshTask = task
         defer { if authGeneration == generation { refreshTask = nil } }
-        let refreshed = try await task.value
+        let refreshed: Tokens
+        do { refreshed = try await task.value }
+        catch {
+            if generation == authGeneration, let error = error as? OAuthError, error.requiresSignIn {
+                signOut()
+            }
+            throw error
+        }
         guard authGeneration == generation, tokens != nil else { throw GraphError.notSignedIn }
         try store.save(refreshed)
         tokens = refreshed

@@ -431,4 +431,9 @@ public final class MailStore: Sendable {
     func setDeltaLink(_ url: URL, for folder: String) throws {
         try pool.write { db in try SyncState(folder: folder, deltaLink: url.absoluteString).save(db) }
     }
+
+    /// Reinicia somente o cursor; conserva mensagens e organização locais.
+    func clearDeltaLink(for folder: String) throws {
+        try pool.write { db in _ = try SyncState.deleteOne(db, key: folder) }
+    }
 }
