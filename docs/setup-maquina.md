@@ -27,6 +27,18 @@ Se aparecer erro de macro `TestingMacros` com o Command Line Tools, use o `DEVEL
 
 Primeiro login: precisa do Client ID do Entra, ver [03-entra.md](03-entra.md).
 
+### Preservar permissões entre compilações locais
+
+A assinatura ad-hoc muda de identidade quando o binário muda. Isso pode fazer o macOS pedir novamente acesso ao calendário e a outros recursos após uma compilação.
+
+Para uso pessoal, uma identidade de assinatura própria e fixa pode ser usada sem Apple Developer Program. Crie uma identidade de tipo Code Signing no Assistente de Certificados do Acesso às Chaves e conserve o mesmo certificado e a chave privada no Keychain. Configure somente nesta máquina, em `App/Signing.xcconfig.local`:
+
+```xcconfig
+MASTERMAIL_CODE_SIGN_IDENTITY = nome ou SHA-1 da identidade local
+```
+
+Esse arquivo é ignorado pelo Git. Não copie a chave privada nem arquivos `.p12` para o repositório. A configuração padrão continua ad-hoc quando o arquivo local não existe. Ao mudar da assinatura ad-hoc para a identidade fixa, pode ser necessário autorizar uma última vez; as compilações seguintes devem conservar a autorização. Essa identidade local não oferece notarização nem substitui Developer ID para distribuição pública. Ver [ADR 0009](decisoes/0009-permissoes-e-assinatura-local.md).
+
 Para o plugin do GitHub funcionar, adicione ao `~/.zshrc`:
 ```
 export GITHUB_PERSONAL_ACCESS_TOKEN=$(gh auth token)

@@ -28,13 +28,17 @@ final class HTTPFixture: @unchecked Sendable {
         }
     }
 
-    func graph(expired: Bool = false) throws -> GraphClient {
+    func makeSession() -> URLSession {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [FixtureProtocol.self]
         config.httpAdditionalHeaders = ["X-Fixture-ID": id]
+        return URLSession(configuration: config)
+    }
+
+    func graph(expired: Bool = false) throws -> GraphClient {
         let store = TokenStore(fileURL: directory.appendingPathComponent("tokens.json"))
         try store.save(Tokens(accessToken: "fake", refreshToken: "fake-refresh", expiresAt: expired ? .distantPast : .distantFuture, scopes: OAuthConfig.defaultScopes))
-        return GraphClient(config: OAuthConfig(clientID: "test", redirectURI: "test://auth"), store: store, session: URLSession(configuration: config))
+        return GraphClient(config: OAuthConfig(clientID: "test", redirectURI: "test://auth"), store: store, session: makeSession())
     }
 
     static func message(_ id: String) -> String {

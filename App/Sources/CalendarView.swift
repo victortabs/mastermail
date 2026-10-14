@@ -58,13 +58,14 @@ final class CalendarModel {
         return (0 ..< count).map { cal.date(byAdding: .day, value: $0, to: interval.start)! }
     }
 
-    func load() async {
+    func load(requestMacAccess: Bool = true) async {
         let generation = UUID()
         loadGeneration = generation
         let range = interval
         isLoading = true
         defer { if loadGeneration == generation { isLoading = false } }
-        if !macAccess { macAccess = await mac.requestAccess() }
+        if requestMacAccess { macAccess = await mac.requestAccess() }
+        else { macAccess = mac.hasCalendarAccess }
         guard loadGeneration == generation else { return }
         if macAccess { calendars = [(Self.microsoftName, nil)] + mac.calendars().map { (name: $0.title, colorHex: $0.colorHex) } }
         do {
@@ -83,6 +84,7 @@ final class CalendarModel {
     }
 
     func loadToday() async {
+        macAccess = mac.hasCalendarAccess
         let cal = Calendar.current
         let start = Date()
         let end = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: start))!
@@ -204,7 +206,8 @@ final class CalendarModel {
                 notes.append("\(offer.recipientName) escolheu \(when), mas o evento não foi criado: \(error.localizedDescription)")
             }
         }
-        if !notes.isEmpty { await load() }
+        // Roda depois da sincronização do Mail: não pede acesso ao calendário fora da agenda (ADR 0009).
+        if !notes.isEmpty { await load(requestMacAccess: false) }
         return notes
     }
 
@@ -292,7 +295,7 @@ struct CalendarView: View {
                 .alert("Erro", isPresented: Binding(get: { cal.error != nil && !creating && cal.editRequest == nil }, set: { if !$0 { cal.error = nil } })) {
                     Button("OK") { cal.error = nil }
                 } message: { Text(cal.error ?? "") }
-                .task { if cal.events.isEmpty { await cal.load() } }
+                .task { await cal.load() }
             } else {
                 ContentUnavailableView("Calendário", systemImage: "calendar", description: Text("Entre com a conta para ver a agenda."))
             }

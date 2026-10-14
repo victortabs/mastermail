@@ -29,6 +29,18 @@ Secrets.xcconfig
 *.p12
 *.mobileprovision
 
+# Dados pessoais locais, inclusive cópias feitas para diagnóstico
+tokens.json
+ai.json
+pending-actions.json
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.eml
+*.pst
+*.ost
+private-data/
+
 # Claude Code (configurações pessoais da máquina)
 .claude/settings.local.json
 

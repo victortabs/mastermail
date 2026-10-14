@@ -12,6 +12,8 @@ final class AppModel {
     enum Phase: Equatable {
         case needsClientID
         case signedOut
+        case restoringSession
+        case sessionUnavailable
         case signedIn(account: String)
     }
 
@@ -141,6 +143,7 @@ final class AppModel {
     let store: MailStore
     private var pollTask: Task<Void, Never>?
     private var backfillTask: Task<Void, Never>?
+    private var sessionRetryTask: Task<Void, Never>?
     private static let pageSize = 300
 
     static let redirectScheme = "msauth.\(Bundle.main.bundleIdentifier ?? "io.github.victortabs.mastermail")"
@@ -176,6 +179,7 @@ final class AppModel {
     }
 
     private func configure(clientID: String) {
+        sessionRetryTask?.cancel()
         accountGeneration = UUID()
         let config = OAuthConfig(clientID: clientID, redirectURI: "\(Self.redirectScheme)://auth")
         let client = GraphClient(config: config, store: tokenStore)
@@ -183,8 +187,14 @@ final class AppModel {
         sync = MailSync(graph: client, store: store, queue: queue)
         calendar = CalendarModel(graph: client)
         pipeline = ClassificationPipeline(store: store, settings: aiSettings)
-        phase = .signedOut
-        Task { if await client.isSignedIn { await loadAccount() } }
+        phase = .restoringSession
+        let generation = accountGeneration
+        Task {
+            let hasSession = await client.isSignedIn
+            guard generation == accountGeneration else { return }
+            if hasSession { await restoreSession() }
+            else { phase = .signedOut }
+        }
     }
 
     // MARK: Login (ADR 0007)
@@ -200,7 +210,7 @@ final class AppModel {
             let code = try OAuth.code(fromCallback: callback, expectedState: state)
             let tokens = try await OAuth.exchange(code: code, pkce: pkce, config: config)
             try await graph.signIn(tokens)
-            await loadAccount()
+            await restoreSession()
         } catch ASWebAuthenticationSessionError.canceledLogin {
         } catch let error as OAuthError where error.needsAdminConsent {
             adminConsentURL = OAuth.adminConsentURL(config: config)
@@ -211,6 +221,8 @@ final class AppModel {
 
     func signOut() async {
         accountGeneration = UUID()
+        sessionRetryTask?.cancel()
+        sessionRetryTask = nil
         pollTask?.cancel()
         backfillTask?.cancel()
         searchTask?.cancel()
@@ -235,8 +247,11 @@ final class AppModel {
         phase = .signedOut
     }
 
-    private func loadAccount() async {
+    func restoreSession() async {
         guard let graph else { return }
+        sessionRetryTask?.cancel()
+        sessionRetryTask = nil
+        phase = .restoringSession
         let generation = accountGeneration
         do {
             let me = try await graph.me()
@@ -256,11 +271,24 @@ final class AppModel {
             startPolling()
             startBackfill()
             Task { await reconcileLocalFolders() }
-            Task { await calendar?.load() }
+            Task { await calendar?.load(requestMacAccess: false) }
         } catch {
             guard accountGeneration == generation else { return }
-            errorMessage = error.localizedDescription
-            phase = .signedOut
+            let hasSession = await graph.isSignedIn
+            guard accountGeneration == generation else { return }
+            if hasSession {
+                phase = .sessionUnavailable
+                // Falta de rede não é logout. Tenta novamente sem abrir o login Microsoft.
+                sessionRetryTask = Task { [weak self] in
+                    do { try await Task.sleep(for: .seconds(30)) } catch { return }
+                    guard let self, self.accountGeneration == generation else { return }
+                    self.sessionRetryTask = nil
+                    await self.restoreSession()
+                }
+            } else {
+                errorMessage = error.localizedDescription
+                phase = .signedOut
+            }
         }
     }
 
@@ -891,6 +919,18 @@ final class AppModel {
 }
 
 enum WebAuth {
+    /// A API pode chamar de uma fila XPC. A closure de entrada não pode herdar MainActor.
+    nonisolated static func completionHandler(
+        onComplete: @escaping @MainActor @Sendable (Result<URL, any Error>) -> Void
+    ) -> @Sendable (URL?, (any Error)?) -> Void {
+        { @Sendable callback, error in
+            let result: Result<URL, any Error>
+            if let callback { result = .success(callback) }
+            else { result = .failure(error ?? OAuthError.invalidCallback) }
+            Task { @MainActor in onComplete(result) }
+        }
+    }
+
     @MainActor
     static func run(url: URL, callbackScheme: String) async throws -> URL {
         let context = SessionContext()
@@ -913,12 +953,10 @@ enum WebAuth {
         func run(url: URL, callbackScheme: String) async throws -> URL {
             try await withCheckedThrowingContinuation { continuation in
                 self.continuation = continuation
-                let session = ASWebAuthenticationSession(url: url, callbackURLScheme: callbackScheme) { [self] callback, error in
-                    Task { @MainActor in
-                        if let callback { finish(.success(callback)) }
-                        else { finish(.failure(error ?? OAuthError.invalidCallback)) }
-                    }
-                }
+                let session = ASWebAuthenticationSession(url: url, callbackURLScheme: callbackScheme,
+                                                        completionHandler: WebAuth.completionHandler { [self] result in
+                    finish(result)
+                })
                 self.session = session
                 session.presentationContextProvider = self
                 session.prefersEphemeralWebBrowserSession = false

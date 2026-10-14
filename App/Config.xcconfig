@@ -1,3 +1,7 @@
 // Client ID público do app registrado no Entra (não é segredo; ver ADR 0007 e docs/03-entra.md).
 // Vazio = o app pede o ID na primeira abertura e guarda em UserDefaults.
 MASTERMAIL_CLIENT_ID = 0ca3bb6f-e4c6-4046-86dc-db596d7f2959
+
+// Assinatura fixa opcional para preservar as permissões nas compilações locais.
+MASTERMAIL_CODE_SIGN_IDENTITY = -
+#include? "Signing.xcconfig.local"
