@@ -15,8 +15,8 @@ settings:
   base:
     SWIFT_VERSION: "6.0"
     MACOSX_DEPLOYMENT_TARGET: "26.0"
-    # ADR 0007: assinatura ad-hoc, sem Team ID, sem Hardened Runtime.
-    CODE_SIGN_IDENTITY: "-"
+    # Sem assinatura local configurada, mantém o padrão ad-hoc da ADR 0007.
+    CODE_SIGN_IDENTITY: "$(MASTERMAIL_CODE_SIGN_IDENTITY)"
     CODE_SIGN_STYLE: Manual
     DEVELOPMENT_TEAM: ""
     ENABLE_HARDENED_RUNTIME: NO

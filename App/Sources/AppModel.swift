@@ -269,7 +269,7 @@ final class AppModel {
             startPolling()
             startBackfill()
             Task { await reconcileLocalFolders() }
-            Task { await calendar?.load() }
+            Task { await calendar?.load(requestMacAccess: false) }
         } catch {
             guard accountGeneration == generation else { return }
             let hasSession = await graph.isSignedIn

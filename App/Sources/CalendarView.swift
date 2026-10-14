@@ -36,13 +36,14 @@ final class CalendarModel {
         return (0 ..< count).map { cal.date(byAdding: .day, value: $0, to: interval.start)! }
     }
 
-    func load() async {
+    func load(requestMacAccess: Bool = true) async {
         let generation = UUID()
         loadGeneration = generation
         let range = interval
         isLoading = true
         defer { if loadGeneration == generation { isLoading = false } }
-        if !macAccess { macAccess = await mac.requestAccess() }
+        if requestMacAccess { macAccess = await mac.requestAccess() }
+        else { macAccess = mac.hasCalendarAccess }
         guard loadGeneration == generation else { return }
         do {
             async let ms = graph.events(from: range.start, to: range.end)
@@ -60,6 +61,7 @@ final class CalendarModel {
     }
 
     func loadToday() async {
+        macAccess = mac.hasCalendarAccess
         let cal = Calendar.current
         let start = Date()
         let end = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: start))!
@@ -131,7 +133,7 @@ struct CalendarView: View {
                     .alert("Erro", isPresented: Binding(get: { cal.error != nil }, set: { if !$0 { cal.error = nil } })) {
                         Button("OK") { cal.error = nil }
                     } message: { Text(cal.error ?? "") }
-                    .task { if cal.events.isEmpty { await cal.load() } }
+                    .task { await cal.load() }
             } else {
                 ContentUnavailableView("Calendário", systemImage: "calendar", description: Text("Entre com a conta para ver a agenda."))
             }
