@@ -62,6 +62,9 @@ struct PeopleView: View {
                     if !c.name.isEmpty { Text(c.address).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
                 }
                 .padding(.vertical, 2)
+                .contextMenu {
+                    Button("Enviar disponibilidade…") { model.availabilityRecipient = c.name.isEmpty ? c.address : "\(c.name) <\(c.address)>" }
+                }
             }
             .overlay {
                 if selected == nil { ContentUnavailableView("Nenhuma organização escolhida", systemImage: "person.2") }

@@ -44,6 +44,7 @@ struct RulesList: View {
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @AppStorage("signatureHTML") private var signature = ""
+    @AppStorage(EventReminders.enabledKey) private var eventReminders = false
     @State private var ai = AISettings()
 
     var body: some View {
@@ -52,6 +53,11 @@ struct SettingsView: View {
                 Text("Cole o HTML copiado do Outlook, ou escreva texto simples (quebras de linha viram linhas).")
                     .font(.caption).foregroundStyle(.secondary)
                 TextEditor(text: $signature).frame(minHeight: 120).font(.body.monospaced())
+            }
+            Section("Agenda") {
+                Toggle("Avisar antes dos eventos (notificação do MasterMail)", isOn: $eventReminders)
+                Text("Desligado, o alerta escolhido em cada evento continua salvo na Microsoft e o Outlook, o celular e outros apps avisam.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section("Regras (zero tokens: resolvem antes de qualquer modelo)") {
                 RulesList()

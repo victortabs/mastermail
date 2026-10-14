@@ -18,6 +18,9 @@ struct RootView: View {
                 }
             }
         }
+        .sheet(item: $model.availabilityRecipient) { recipient in
+            if let cal = model.calendar { AvailabilitySheet(cal: cal, recipient: recipient) }
+        }
         .alert("Erro", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
             Button("OK") { model.errorMessage = nil }
         } message: {

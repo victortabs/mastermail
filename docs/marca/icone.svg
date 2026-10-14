@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Ícone do MasterMail: envelope desenhado à mão. Fonte dos PNGs do AppIcon: for s in 16 32 64 128 256 512 1024; do rsvg-convert -w $s docs/marca/icone.svg -o App/Resources/Assets.xcassets/AppIcon.appiconset/icon_$s.png; done -->
+  <defs>
+    <linearGradient id="papel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FBF6EC"/>
+      <stop offset="1" stop-color="#F1E6D2"/>
+    </linearGradient>
+    <filter id="grao" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="3"/>
+      <feColorMatrix values="0 0 0 0 0.45  0 0 0 0 0.38  0 0 0 0 0.28  0 0 0 0.09 0"/>
+    </filter>
+    <filter id="traco" x="-10%" y="-10%" width="120%" height="120%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.018" numOctaves="2" seed="7" result="r"/>
+      <feDisplacementMap in="SourceGraphic" in2="r" scale="10"/>
+    </filter>
+    <filter id="aguada" x="-10%" y="-10%" width="120%" height="120%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.02" numOctaves="3" seed="11" result="r"/>
+      <feDisplacementMap in="SourceGraphic" in2="r" scale="22"/>
+    </filter>
+  </defs>
+
+  <rect width="1024" height="1024" fill="url(#papel)"/>
+  <rect width="1024" height="1024" filter="url(#grao)"/>
+
+  <g transform="rotate(-6 512 512)">
+    <!-- aguada azul, fora de registro com o traço, como aquarela -->
+    <path filter="url(#aguada)" fill="#4F86EA" opacity="0.92"
+          d="M232 338 Q520 318 834 332 Q846 528 830 740 Q520 756 226 738 Q212 530 232 338 Z"/>
+    <!-- traço de tinta -->
+    <g filter="url(#traco)" fill="none" stroke="#1D2640" stroke-linecap="round" stroke-linejoin="round">
+      <path stroke-width="27" d="M212 316 Q512 294 818 310 Q830 512 812 718 Q512 736 206 716 Q192 512 212 316 Z"/>
+      <path stroke-width="27" d="M220 326 Q366 450 510 552 Q660 452 808 318"/>
+      <path stroke-width="18" opacity="0.55" d="M222 704 Q330 610 422 540"/>
+      <path stroke-width="18" opacity="0.55" d="M800 706 Q694 612 600 540"/>
+      <!-- segunda passada do contorno, levemente deslocada -->
+      <path stroke-width="9" opacity="0.5" d="M206 330 Q500 306 826 322"/>
+    </g>
+    <!-- selo -->
+    <circle filter="url(#aguada)" cx="512" cy="556" r="46" fill="#F0644B"/>
+  </g>
+</svg>

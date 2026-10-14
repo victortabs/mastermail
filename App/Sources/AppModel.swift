@@ -102,6 +102,8 @@ final class AppModel {
         }
     }
     var errorMessage: String?
+    /// Folha "Enviar disponibilidade" aberta, com o destinatário já preenchido ("" = escolher).
+    var availabilityRecipient: String?
     /// O tenant pediu aprovação do administrador: URL de consentimento para mandar ao TI.
     var adminConsentURL: URL?
 
@@ -398,10 +400,21 @@ final class AppModel {
             }
             syncError = nil
             if id == selectedFolderID { await reloadList() }
-            if id == wellKnown[.inbox] { await classifyInbox() }
+            if id == wellKnown[.inbox] {
+                await classifyInbox()
+                await checkAvailabilityReplies(inbox: id)
+            }
         } catch {
             if !Task.isCancelled { syncError = error.localizedDescription }
         }
+    }
+
+    /// Quem recebeu a Disponibilidade e clicou num horário responde com a referência no assunto: vira evento.
+    private func checkAvailabilityReplies(inbox: String) async {
+        guard let calendar, calendar.offers.contains(where: { $0.status == .waiting }) else { return }
+        let recent = (try? store.messages(in: inbox, limit: 100)) ?? []
+        let notes = await calendar.processOfferReplies(recent)
+        if !notes.isEmpty { showToast(notes.joined(separator: "\n")) }
     }
 
     // MARK: IA (Tipo, Importante, Triagem, Regras)

@@ -120,6 +120,14 @@ _Evitar_: iCloud (é só uma das fontes), EventKit (é o mecanismo)
 O calendário da conta Microsoft 365. O MasterMail cria, edita, move e convida.
 _Evitar_: calendário do Outlook, Exchange
 
+**Alerta**:
+Aviso antes de um evento ("15 min antes"), salvo no evento da Agenda Microsoft; quem avisa é o Outlook, o celular ou, se ligado, o MasterMail.
+_Evitar_: lembrete (é a tarefa do Lembretes.app), notificação
+
+**Disponibilidade**:
+E-mail com horários livres da agenda para uma pessoa escolher. Cada horário é um botão que abre a resposta pronta; quando ela chega, o MasterMail cria o evento com convite.
+_Evitar_: link de agendamento, Calendly
+
 **Lembrete**:
 Tarefa do Lembretes.app (iCloud). O MasterMail lê, cria e edita; é onde nasce uma tarefa criada a partir de uma mensagem.
 _Evitar_: tarefa, to-do, Microsoft To Do

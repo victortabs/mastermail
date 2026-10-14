@@ -18,6 +18,13 @@ public final class MacCalendar {
         (try? await store.requestFullAccessToReminders()) ?? false
     }
 
+    /// Calendários do Mac que o MasterMail mostra (mesmo filtro de `events`), com a cor de cada um.
+    public func calendars() -> [(title: String, colorHex: String?)] {
+        store.calendars(for: .event).filter { $0.source.sourceType != .exchange }
+            .map { ($0.title, $0.cgColor.flatMap(Self.hex)) }
+            .sorted { $0.title.localizedCompare($1.title) == .orderedAscending }
+    }
+
     /// Só calendários que NÃO são Exchange: a conta Microsoft já vem pelo Graph, senão cada evento aparece duas vezes.
     public func events(from start: Date, to end: Date) -> [CalendarEvent] {
         let calendars = store.calendars(for: .event).filter { $0.source.sourceType != .exchange }
@@ -29,9 +36,19 @@ public final class MacCalendar {
                 source: .mac(calendar: e.calendar.title),
                 title: e.title ?? "(sem título)", start: e.startDate, end: e.endDate, isAllDay: e.isAllDay,
                 location: e.location, organizer: e.organizer?.name,
-                attendees: (e.attendees ?? []).compactMap(\.name), isCancelled: e.status == .canceled
+                attendees: (e.attendees ?? []).compactMap { $0.name.map { CalendarEvent.Invitee(name: $0) } }, isCancelled: e.status == .canceled,
+                colorHex: e.calendar.cgColor.flatMap(Self.hex),
+                showAs: e.availability == .free ? "free" : nil,
+                joinURL: CalendarEvent.meetingLink(in: [e.url?.absoluteString, e.location, e.notes]),
+                seriesMasterID: e.hasRecurrenceRules ? e.calendarItemIdentifier : nil
             )
         }
+    }
+
+    private static func hex(_ color: CGColor) -> String? {
+        guard let rgb = color.converted(to: CGColorSpace(name: CGColorSpace.sRGB)!, intent: .defaultIntent, options: nil)?.components,
+              rgb.count >= 3 else { return nil }
+        return String(format: "#%02X%02X%02X", Int(rgb[0] * 255), Int(rgb[1] * 255), Int(rgb[2] * 255))
     }
 
     /// Cria um Lembrete na lista padrão do Lembretes.app (tarefa a partir de uma mensagem).

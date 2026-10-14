@@ -6,7 +6,7 @@
 >
 > Revisão de confiabilidade e lacunas: [avaliação de 13/10/2026](avaliacao-2026-10-13.md). Status abaixo descreve implementação; validação com Microsoft real está indicada separadamente.
 >
-> **Status (2026-10-13, fim do dia):** ✅ feito · 🟡 parcial · ⬜ não começou. Atualizar a cada entrega.
+> **Status (2026-10-14):** ✅ feito · 🟡 parcial · ⬜ não começou. Atualizar a cada entrega.
 
 ## Conta e sincronização
 | Requisito | Prioridade | Notas |
@@ -105,8 +105,11 @@
 ## Calendário e tarefas
 | Requisito | Prioridade | Notas |
 |---|---|---|
-| Agenda Microsoft: ver, criar, editar, mover, convidar, aceitar/recusar | Must | **🟡 ver/criar/convidar/responder; editar/mover pela interface: ⬜** |
+| Agenda Microsoft: ver, criar, editar, mover, convidar, aceitar/recusar | Must | **✅ (validar com conta real)** dia/semana/mês, arrastar e esticar, repetição (só este / série), Teams, status dos convidados. Checklist completo em [05-agenda.md](05-agenda.md) |
 | Agenda do Mac (iCloud etc.): só visualizar | Must | EventKit exige acesso total mesmo para ler. **✅** |
+| Alerta do evento salvo na Microsoft; notificação do MasterMail opcional (desligada) | Must | Usuário já recebe os avisos por outros apps. **✅** |
+| Enviar disponibilidade: horários livres por e-mail, a pessoa escolhe e o evento é criado | Should | Pedido de 2026-10-14; sem servidor (resposta com referência no assunto). **✅ (validar com conta real)** |
+| "Entrar na reunião" abre direto no app do Teams; outros links pelo navegador | Must | **✅** |
 | Convite recebido por e-mail: aceitar/recusar atualizando a agenda | Must | **🟡 cartão e ações implementados; validar com convite real** |
 | Lembretes (iCloud): ler, criar, editar | Must | **🟡 criar; ler/editar: ⬜** |
 | Evento a partir de mensagem | Must | **✅** |

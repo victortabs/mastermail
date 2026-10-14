@@ -199,6 +199,10 @@ struct MailboxView: View {
             .init("Buscar", "/") { searchFocused = true },
             .init("Atualizar", "⌘⇧R") { Task { await model.refresh() } },
             .init("Calendário", "⌘2") { model.view = .calendar },
+            .init("Enviar disponibilidade", "") {
+                let m = targetID.flatMap { id in model.messages.first { $0.id == id } }
+                model.availabilityRecipient = m.map { $0.fromName.isEmpty ? $0.fromAddress : "\($0.fromName) <\($0.fromAddress)>" } ?? ""
+            },
             .init("Pessoas", "⌘3") { model.view = .people },
             .init("Atalhos", "?") { showHelp = true },
             .init("Aba lateral", "⌘⇧A") { model.showAssistant.toggle() },

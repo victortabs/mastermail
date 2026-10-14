@@ -90,6 +90,10 @@ struct MessageCard: View {
                 HStack(spacing: 8) {
                     Button { reminderSheet = true } label: { Label("Lembrete", systemImage: "checklist") }
                     Button { eventSheet = true } label: { Label("Evento", systemImage: "calendar.badge.plus") }
+                    Button { model.availabilityRecipient = m.fromName.isEmpty ? m.fromAddress : "\(m.fromName) <\(m.fromAddress)>" } label: {
+                        Label("Disponibilidade", systemImage: "calendar.badge.clock")
+                    }
+                    .help("Enviar seus horários livres para quem mandou")
                     if let tipo = m.tipo.flatMap(Tipo.init(rawValue:)), tipo == .newsletter || tipo == .promocao {
                         Button { Task { await model.unsubscribe(m) } } label: { Label("Cancelar inscrição", systemImage: "xmark.circle") }
                     }
